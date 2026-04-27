@@ -1,4 +1,4 @@
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Terminal,
   Bell,
@@ -11,8 +11,11 @@ import {
   Swords,
   Copy,
   Check,
+  ArrowUp,
+  Heart,
+  Send,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import GridBackground from '../components/landing/GridBackground';
 import Reveal from '../components/landing/Reveal';
 import TerminalDemo from '../components/landing/TerminalDemo';
@@ -39,7 +42,42 @@ export default function Landing() {
       <Support />
       <CTA />
       <Footer />
+      <BackToTop />
     </div>
+  );
+}
+
+function BackToTop() {
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    const onScroll = () => setVisible(window.scrollY > 400);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  const scrollUp = () =>
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  return (
+    <AnimatePresence>
+      {visible && (
+        <motion.button
+          key="back-to-top"
+          type="button"
+          onClick={scrollUp}
+          aria-label="Наверх"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 12 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
+          className="fixed z-50 bottom-6 right-6 inline-flex items-center justify-center w-11 h-11 rounded-full border border-emerald-500/30 bg-zinc-900/80 backdrop-blur text-emerald-400 hover:text-emerald-300 hover:border-emerald-500/60 hover:bg-zinc-900 shadow-lg shadow-emerald-500/10 transition-colors"
+        >
+          <ArrowUp size={18} strokeWidth={2.2} />
+        </motion.button>
+      )}
+    </AnimatePresence>
   );
 }
 
@@ -422,11 +460,16 @@ function DemoSection() {
         <Reveal>
           <JapaneseDivider kanji="眼" label="The Eye" />
           <h2 className="text-3xl md:text-4xl font-semibold tracking-tight leading-tight">
-            Так выглядит алерт
+            Что приходит в Telegram
           </h2>
           <p className="mt-4 text-zinc-400 leading-relaxed">
-            Каждое событие — IP, порт, время, что сделал автобан, и (если подключил AI) короткий разбор от Claude / GPT / Gemini.
-            Цепочки атак от одного IP объединяются в отдельный alert при score ≥ 50.
+            Откуда пришла атака, на какие порты ломились, в какое время — и что агент уже сделал
+            (заблокировал IP или просто записал). Если подключён AI — добавляется короткий разбор
+            на русском: бот это или человек, что искали, насколько опасно.
+          </p>
+          <p className="mt-3 text-zinc-500 leading-relaxed text-sm">
+            Когда один IP пытается несколько разных вещей подряд — приходит одно сообщение со всей
+            цепочкой, а не десять отдельных.
           </p>
         </Reveal>
       </div>
@@ -494,6 +537,16 @@ function FAQ() {
   );
 }
 
+// Стена донатеров. Чтобы добавить нового — просто допиши объект в массив и
+// сделай commit. Поля: handle (с @ или без — отрисуется единообразно),
+// note (опционально, короткая ремарка в одну строку).
+const DONORS = [
+  // { handle: '@example', note: 'first supporter' },
+];
+
+const TELEGRAM_HANDLE = '@kitay9';
+const TELEGRAM_URL = 'https://t.me/kitay9';
+
 function Support() {
   const wallets = [
     {
@@ -537,8 +590,106 @@ function Support() {
             ))}
           </div>
         </Reveal>
+
+        <Reveal delay={0.15}>
+          <div className="mt-10 rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 via-zinc-900/40 to-zinc-900/40 p-6 md:p-8">
+            <div className="flex items-start gap-4">
+              <div className="shrink-0 inline-flex items-center justify-center w-11 h-11 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
+                <Send size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base md:text-lg font-semibold text-zinc-100">
+                  Хочешь попасть в стену чести?
+                </h3>
+                <p className="mt-1.5 text-sm text-zinc-400 leading-relaxed">
+                  После доната напиши в Telegram{' '}
+                  <a
+                    href={TELEGRAM_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-emerald-400 hover:text-emerald-300 font-mono"
+                  >
+                    {TELEGRAM_HANDLE}
+                  </a>{' '}
+                  свой ник — добавлю в список ниже навсегда.
+                </p>
+                <a
+                  href={TELEGRAM_URL}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-4 inline-flex items-center gap-1.5 text-xs font-medium px-3 py-2 rounded-md border border-emerald-500/30 hover:border-emerald-500/60 hover:bg-emerald-500/10 transition-colors text-emerald-300"
+                >
+                  <Send size={13} />
+                  Написать в Telegram
+                </a>
+              </div>
+            </div>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.2}>
+          <DonorsWall donors={DONORS} />
+        </Reveal>
       </div>
     </section>
+  );
+}
+
+function DonorsWall({ donors }) {
+  const empty = !donors || donors.length === 0;
+
+  return (
+    <div className="mt-10">
+      <div className="flex items-center gap-3 mb-5">
+        <Heart size={14} className="text-emerald-400" strokeWidth={2.4} />
+        <h3 className="text-sm font-semibold tracking-wide uppercase text-zinc-300">
+          Стена чести
+        </h3>
+        {!empty && (
+          <span className="text-xs text-zinc-500 font-mono ml-auto">
+            {donors.length} {donors.length === 1 ? 'самурай' : 'самураев'}
+          </span>
+        )}
+      </div>
+
+      {empty ? (
+        <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/30 p-8 text-center">
+          <p className="text-sm text-zinc-500">
+            Пока пусто.{' '}
+            <a
+              href={TELEGRAM_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-emerald-400 hover:text-emerald-300 font-medium"
+            >
+              Будь первым
+            </a>{' '}
+            — твой ник окажется здесь и останется навсегда.
+          </p>
+        </div>
+      ) : (
+        <ul className="flex flex-wrap gap-2">
+          {donors.map((d) => {
+            const handle = d.handle.startsWith('@') ? d.handle : `@${d.handle}`;
+            const tgUrl = `https://t.me/${handle.replace(/^@/, '')}`;
+            return (
+              <li key={handle}>
+                <a
+                  href={tgUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={d.note || handle}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-zinc-800 bg-zinc-900/50 hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-colors text-sm text-zinc-300 hover:text-zinc-100 font-mono"
+                >
+                  <Heart size={11} className="text-emerald-400/70" fill="currentColor" />
+                  {handle}
+                </a>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
   );
 }
 
