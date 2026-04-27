@@ -36,6 +36,7 @@ export default function Landing() {
       <HowItWorks />
       <DemoSection />
       <FAQ />
+      <Support />
       <CTA />
       <Footer />
     </div>
@@ -493,6 +494,89 @@ function FAQ() {
   );
 }
 
+function Support() {
+  const wallets = [
+    {
+      label: 'USDT',
+      network: 'TRON · TRC20',
+      address: 'TF9F2FPkreHVfbe8tZtn4V76j3jLo4SeXM',
+    },
+    {
+      label: 'TON',
+      network: 'The Open Network',
+      address: 'UQBl88kXWJWyHkDPkWNYQwwSCiCAIfA2DiExtZElwJFlIc1o',
+    },
+  ];
+
+  return (
+    <section id="support" className="relative py-24 md:py-32 border-t border-zinc-900/80 overflow-hidden">
+      <KanjiWatermark
+        char="恩"
+        className="left-[5%] top-[20%] text-[160px] md:text-[240px] hidden md:block"
+        target={0.03}
+      />
+
+      <div className="relative max-w-3xl mx-auto px-5">
+        <Reveal>
+          <div className="text-center">
+            <JapaneseDivider kanji="恩" label="Gratitude" />
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
+              Поддержать проект
+            </h2>
+            <p className="mt-4 text-zinc-400 leading-relaxed max-w-xl mx-auto">
+              GORONIN развивается на энтузиазме и в свободное время. Если он оказался полезен — поддержать можно криптой.
+              Любая сумма помогает выделить больше времени на новые ловушки и фичи из roadmap.
+            </p>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.1}>
+          <div className="mt-10 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {wallets.map((w, i) => (
+              <WalletCard key={w.label} {...w} delay={i * 0.05} />
+            ))}
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function WalletCard({ label, network, address }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* empty */
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 backdrop-blur">
+      <div className="flex items-baseline justify-between mb-3">
+        <span className="text-base font-semibold text-zinc-100">{label}</span>
+        <span className="text-xs text-zinc-500 font-mono">{network}</span>
+      </div>
+      <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+        <code className="text-xs text-emerald-300 font-mono break-all flex-1 min-w-0">
+          {address}
+        </code>
+        <button
+          onClick={onCopy}
+          className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-md border border-zinc-700 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-colors text-zinc-300"
+          aria-label={`Скопировать адрес ${label}`}
+        >
+          {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+          {copied ? 'Скопировано' : 'Копировать'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CTA() {
   return (
     <section className="relative py-24 md:py-32 border-t border-zinc-900/80 overflow-hidden">
@@ -555,6 +639,7 @@ function Footer() {
           <a href="#features" className="hover:text-zinc-300 transition-colors">Возможности</a>
           <a href="#install" className="hover:text-zinc-300 transition-colors">Установка</a>
           <a href="#faq" className="hover:text-zinc-300 transition-colors">FAQ</a>
+          <a href="#support" className="hover:text-zinc-300 transition-colors">Поддержать</a>
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors flex items-center gap-1.5">
             <Github size={14} /> GitHub
           </a>
