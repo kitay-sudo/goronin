@@ -14,6 +14,8 @@ import {
   ArrowUp,
   Heart,
   Send,
+  Shield,
+  Eye,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import GridBackground from '../components/landing/GridBackground';
@@ -36,6 +38,7 @@ export default function Landing() {
       <RoninStory />
       <LogosStrip />
       <Features />
+      <Versus />
       <HowItWorks />
       <DemoSection />
       <FAQ />
@@ -161,25 +164,6 @@ function Hero() {
             Расставляет ловушки на сервере, ловит сканеры и взломщиков в реальном времени,
             мгновенно шлёт алерт в Telegram и сам банит атакующий IP в iptables.
           </p>
-        </Reveal>
-
-        <Reveal delay={0.12}>
-          <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-sm text-zinc-500">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-1 h-1 rounded-full bg-emerald-400/70" />
-              Поддельные порты-приманки (SSH, HTTP, MySQL…)
-            </span>
-            <span className="text-zinc-700">·</span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-1 h-1 rounded-full bg-emerald-400/70" />
-              Алерт в Telegram через секунды
-            </span>
-            <span className="text-zinc-700">·</span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="w-1 h-1 rounded-full bg-emerald-400/70" />
-              Автоблокировка IP через iptables
-            </span>
-          </div>
         </Reveal>
 
         <Reveal delay={0.16}>
@@ -406,6 +390,120 @@ function Features() {
   );
 }
 
+function Versus() {
+  const rows = [
+    {
+      label: 'Что триггерит бан',
+      goronin: 'Первый же коннект на порт-приманку — туда легитимный трафик не ходит',
+      classic: 'N неудачных попыток в логе боевого сервиса (sshd, nginx)',
+    },
+    {
+      label: 'Когда ловит атакующего',
+      goronin: 'На стадии разведки — пока он только сканирует порты',
+      classic: 'Когда уже стучится в реальный SSH / веб с подбором пароля',
+    },
+    {
+      label: 'False positives',
+      goronin: 'Близко к нулю — на honeypot-порту не бывает «своих»',
+      classic: 'Бывают: опечатался в пароле — забанил себя',
+    },
+    {
+      label: 'Мониторинг файлов',
+      goronin: 'Да — inotify на .env, id_rsa и подкинутые канарейки',
+      classic: 'Нет — только парсинг логов',
+    },
+    {
+      label: 'Алерты в Telegram',
+      goronin: 'Из коробки, с опциональным AI-разбором атаки',
+      classic: 'Пилится руками через action.d',
+    },
+    {
+      label: 'Защита публичного SSH/nginx',
+      goronin: 'Не покрывает — это не его задача',
+      classic: 'Базовый сценарий, для которого fail2ban и сделан',
+    },
+  ];
+
+  return (
+    <section className="relative py-24 md:py-32 border-t border-zinc-900/80 overflow-hidden">
+      <KanjiWatermark
+        char="比"
+        className="left-[3%] top-[15%] text-[160px] md:text-[240px] hidden md:block"
+        target={0.03}
+      />
+
+      <div className="relative max-w-5xl mx-auto px-5">
+        <Reveal>
+          <div className="text-center max-w-2xl mx-auto">
+            <JapaneseDivider kanji="比" label="The Comparison" />
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
+              GORONIN vs fail2ban
+            </h2>
+            <p className="mt-4 text-zinc-400 leading-relaxed">
+              Сам механизм бана у нас тот же — iptables. Разница в том,{' '}
+              <span className="text-zinc-200">что именно</span> заставляет систему сработать. Это не замена
+              fail2ban, а другой класс защиты. Хорошо стоят вместе.
+            </p>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.1}>
+          <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-px bg-zinc-900/80 rounded-2xl overflow-hidden border border-zinc-900/80">
+            <div className="bg-zinc-950 p-5 md:p-6 border-b md:border-b-0 md:border-r border-zinc-900/80">
+              <div className="flex items-center gap-2.5 mb-1">
+                <span className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
+                  <Shield size={16} />
+                </span>
+                <span className="text-base font-semibold text-zinc-100">GORONIN</span>
+                <span className="text-xs text-zinc-500 font-mono ml-auto">honeypot-first</span>
+              </div>
+              <p className="text-sm text-zinc-500">Ловит на стадии разведки — до того, как взломщик дошёл до боевого сервиса.</p>
+            </div>
+            <div className="bg-zinc-950 p-5 md:p-6">
+              <div className="flex items-center gap-2.5 mb-1">
+                <span className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-zinc-700 bg-zinc-900 text-zinc-400">
+                  <Eye size={16} />
+                </span>
+                <span className="text-base font-semibold text-zinc-100">fail2ban / CrowdSec</span>
+                <span className="text-xs text-zinc-500 font-mono ml-auto">log-first</span>
+              </div>
+              <p className="text-sm text-zinc-500">Парсит логи реальных сервисов и банит после порога неудачных попыток.</p>
+            </div>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.15}>
+          <div className="mt-px overflow-hidden rounded-2xl border border-zinc-900/80 divide-y divide-zinc-900/80">
+            {rows.map((r) => (
+              <div
+                key={r.label}
+                className="grid grid-cols-1 md:grid-cols-[200px_1fr_1fr] bg-zinc-950"
+              >
+                <div className="px-5 py-4 md:py-5 text-xs uppercase tracking-wider text-zinc-500 font-medium md:border-r border-zinc-900/80 flex md:items-center">
+                  {r.label}
+                </div>
+                <div className="px-5 py-3 md:py-5 text-sm text-zinc-200 md:border-r border-zinc-900/80 leading-relaxed">
+                  {r.goronin}
+                </div>
+                <div className="px-5 py-3 pb-5 md:py-5 text-sm text-zinc-400 leading-relaxed">
+                  {r.classic}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.2}>
+          <p className="mt-8 text-center text-sm text-zinc-500 max-w-2xl mx-auto leading-relaxed">
+            Сценарий, в котором это работает идеально: fail2ban сторожит публичный SSH и веб,
+            а GORONIN ловит того, кто сканирует порты в поисках чего ещё открыто. Два разных слоя.
+          </p>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
 function HowItWorks() {
   const steps = [
     {
@@ -511,6 +609,10 @@ function FAQ() {
     {
       q: 'Что именно делает агент?',
       a: '1) Поднимает honeypot-ловушки на случайных high-портах (SSH/HTTP/FTP/MySQL). 2) Через inotify следит за чувствительными файлами и созданными канарейками. 3) При попадании в ловушку — пишет в локальный bbolt, считает hits per IP, банит через iptables (с эскалацией). 4) Шлёт алерт в Telegram, опционально с AI-разбором.',
+    },
+    {
+      q: 'Заменяет ли это fail2ban / CrowdSec?',
+      a: 'Нет, и не пытается. fail2ban парсит логи реальных сервисов (sshd, nginx) и банит после N неудачных попыток — это его работа. GORONIN ловит другой класс атак: разведку и сканирование портов, до того как взломщик дошёл до боевого сервиса. Сам бан в обоих случаях идёт через iptables. Идеальный сетап — оба вместе: fail2ban охраняет публичный SSH и веб, GORONIN ловит сканеры на портах-приманках.',
     },
     {
       q: 'Какой AI-провайдер выбрать?',
