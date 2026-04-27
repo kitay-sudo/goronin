@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+coverage/
+*.log
+.DS_Store
+tmp/
+
+# Go
+agent/bin/
+agent/goronin
+*.exe
+
+# Docker
+docker-data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

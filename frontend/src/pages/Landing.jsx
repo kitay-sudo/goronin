@@ -1,0 +1,565 @@
+import { motion } from 'framer-motion';
+import {
+  Terminal,
+  Bell,
+  Brain,
+  FileWarning,
+  Lock,
+  Github,
+  Gauge,
+  Network,
+  Swords,
+  Copy,
+  Check,
+} from 'lucide-react';
+import { useState } from 'react';
+import GridBackground from '../components/landing/GridBackground';
+import Reveal from '../components/landing/Reveal';
+import TerminalDemo from '../components/landing/TerminalDemo';
+import FeatureCard from '../components/landing/FeatureCard';
+import FAQItem from '../components/landing/FAQItem';
+import RoninMark from '../components/landing/RoninMark';
+import KanjiWatermark from '../components/landing/KanjiWatermark';
+import JapaneseDivider from '../components/landing/JapaneseDivider';
+
+const REPO_URL = 'https://github.com/kitay-sudo/goronin';
+const INSTALL_CMD = 'curl -sSL https://raw.githubusercontent.com/kitay-sudo/goronin/main/install.sh | sudo bash';
+
+export default function Landing() {
+  return (
+    <div className="min-h-dvh bg-zinc-950 text-zinc-100 antialiased">
+      <Nav />
+      <Hero />
+      <RoninStory />
+      <LogosStrip />
+      <Features />
+      <HowItWorks />
+      <DemoSection />
+      <FAQ />
+      <CTA />
+      <Footer />
+    </div>
+  );
+}
+
+function Nav() {
+  return (
+    <header className="sticky top-0 z-50 border-b border-zinc-900/80 bg-zinc-950/70 backdrop-blur-lg">
+      <div className="max-w-6xl mx-auto px-5 h-14 flex items-center justify-between">
+        <a href="#top" className="flex items-center gap-2.5 font-semibold">
+          <span className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-emerald-500/30 bg-emerald-500/10 text-emerald-400">
+            <RoninMark size={22} />
+          </span>
+          <span className="tracking-tight">GORONIN</span>
+        </a>
+
+        <nav className="hidden md:flex items-center gap-7 text-sm text-zinc-400">
+          <a href="#way" className="hover:text-zinc-100 transition-colors">Путь</a>
+          <a href="#features" className="hover:text-zinc-100 transition-colors">Возможности</a>
+          <a href="#how" className="hover:text-zinc-100 transition-colors">Как работает</a>
+          <a href="#install" className="hover:text-zinc-100 transition-colors">Установка</a>
+          <a href="#faq" className="hover:text-zinc-100 transition-colors">FAQ</a>
+        </nav>
+
+        <a
+          href={REPO_URL}
+          target="_blank"
+          rel="noreferrer"
+          className="text-sm font-medium bg-emerald-500 hover:bg-emerald-400 text-zinc-950 rounded-lg px-3.5 py-1.5 transition-colors flex items-center gap-1.5"
+        >
+          <Github size={14} />
+          GitHub
+        </a>
+      </div>
+    </header>
+  );
+}
+
+function Hero() {
+  return (
+    <section id="top" className="relative overflow-hidden">
+      <GridBackground />
+
+      <KanjiWatermark
+        char="牢"
+        className="right-[3%] top-[12%] text-[180px] md:text-[260px] hidden sm:block"
+        target={0.045}
+      />
+      <KanjiWatermark
+        char="人"
+        className="right-[3%] top-[40%] text-[180px] md:text-[260px] hidden sm:block"
+        target={0.045}
+      />
+      <KanjiWatermark
+        char="守"
+        className="left-[4%] top-[20%] text-[160px] md:text-[220px] hidden md:block"
+        target={0.03}
+      />
+
+      <div className="relative max-w-6xl mx-auto px-5 pt-20 md:pt-28 pb-20 md:pb-32">
+        <Reveal>
+          <div className="flex justify-center">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-zinc-800 bg-zinc-900/60 text-xs text-zinc-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="font-serif-jp text-zinc-500">浪人</span>
+              <span className="h-3 w-px bg-zinc-700" />
+              Open-source honeypot guard · MIT
+            </div>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.05}>
+          <h1 className="mt-6 text-center text-4xl md:text-6xl font-semibold tracking-tight leading-[1.05]">
+            Страж без хозяина.<br />
+            <span className="bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">
+              Молча ждёт. Вовремя бьёт.
+            </span>
+          </h1>
+        </Reveal>
+
+        <Reveal delay={0.1}>
+          <p className="mt-6 text-center text-base md:text-lg text-zinc-400 max-w-2xl mx-auto leading-relaxed">
+            Один Go-бинарь на ваш сервер. Ловушки на портах, мониторинг файлов, авто-бан в iptables,
+            алерты в Telegram с разбором от AI (Claude / GPT / Gemini — на ваш выбор). Без бэкенда. Без аккаунтов.
+            Полностью open-source.
+          </p>
+        </Reveal>
+
+        <Reveal delay={0.15}>
+          <div className="mt-8 max-w-2xl mx-auto">
+            <InstallCommand />
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.2}>
+          <div className="mt-5 flex flex-col sm:flex-row items-center justify-center gap-3">
+            <a
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 text-zinc-300 hover:text-zinc-100 border border-zinc-800 hover:border-zinc-700 rounded-xl px-5 py-3 transition-colors"
+            >
+              <Github size={16} />
+              Исходники на GitHub
+            </a>
+            <a
+              href="#how"
+              className="w-full sm:w-auto flex items-center justify-center gap-2 text-zinc-400 hover:text-zinc-200 transition-colors px-5 py-3"
+            >
+              <Terminal size={16} />
+              Как работает
+            </a>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.25}>
+          <div className="mt-6 text-center text-xs text-zinc-500">
+            Бесплатно навсегда · Полный код открыт · MIT-лицензия · Работает на любом Linux с systemd
+          </div>
+        </Reveal>
+
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+          className="mt-14 md:mt-20 max-w-3xl mx-auto"
+        >
+          <TerminalDemo />
+        </motion.div>
+      </div>
+    </section>
+  );
+}
+
+function InstallCommand() {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(INSTALL_CMD);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* empty */
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-emerald-500/30 bg-zinc-900/80 backdrop-blur p-4 shadow-lg shadow-emerald-500/10">
+      <div className="flex items-center justify-between gap-3">
+        <code className="text-xs sm:text-sm text-emerald-300 font-mono break-all flex-1 min-w-0">
+          {INSTALL_CMD}
+        </code>
+        <button
+          onClick={onCopy}
+          className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-md border border-zinc-700 hover:border-emerald-500/50 hover:bg-emerald-500/10 transition-colors text-zinc-300"
+          aria-label="Скопировать команду"
+        >
+          {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+          {copied ? 'Скопировано' : 'Копировать'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function RoninStory() {
+  return (
+    <section id="way" className="relative border-y border-zinc-900/80 overflow-hidden">
+      <KanjiWatermark
+        char="道"
+        className="left-[50%] top-[50%] -translate-x-1/2 -translate-y-1/2 text-[280px] md:text-[440px]"
+        target={0.035}
+      />
+
+      <div className="relative max-w-4xl mx-auto px-5 py-20 md:py-28 text-center">
+        <Reveal>
+          <JapaneseDivider kanji="道" label="The Way" />
+          <h2 className="text-3xl md:text-5xl font-semibold tracking-tight leading-tight">
+            Почему <span className="text-emerald-400">ронин</span>?
+          </h2>
+        </Reveal>
+
+        <Reveal delay={0.1}>
+          <p className="mt-6 text-zinc-400 leading-relaxed md:text-lg">
+            Ронин — 浪人 — самурай без хозяина. Скитающийся воин, не связанный приказами,
+            действующий по своему кодексу.
+          </p>
+        </Reveal>
+
+        <Reveal delay={0.15}>
+          <p className="mt-4 text-zinc-400 leading-relaxed md:text-lg">
+            GORONIN (<span className="text-emerald-400 font-mono">Go + ronin</span>) —
+            агент-страж, который ставишь на сервер и забываешь. Он сам мониторит, сам ловит, сам блокирует.
+            Не ходит на чужие серверы за командами — только локальный демон и исходящие алерты.
+          </p>
+        </Reveal>
+
+        <Reveal delay={0.2}>
+          <div className="mt-10 grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[
+              { kanji: '黙', label: 'Молчание', desc: 'Бинарь ~10 МБ, < 30 МБ RAM. Не шумит в логах, не нагружает CPU.' },
+              { kanji: '速', label: 'Скорость', desc: 'Алерт в Telegram через секунды после первого коннекта на ловушку.' },
+              { kanji: '義', label: 'Верность', desc: 'Никаких бэкендов и аккаунтов. Только локально и исходящие HTTPS.' },
+            ].map((v) => (
+              <div
+                key={v.kanji}
+                className="rounded-2xl border border-zinc-800/80 bg-zinc-900/40 p-5 text-left"
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <span
+                    className="text-2xl text-zinc-600"
+                    style={{ fontFamily: '"Noto Serif JP", serif', fontWeight: 500 }}
+                  >
+                    {v.kanji}
+                  </span>
+                  <span className="text-sm font-semibold text-zinc-100">{v.label}</span>
+                </div>
+                <p className="text-sm text-zinc-400 leading-relaxed">{v.desc}</p>
+              </div>
+            ))}
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function LogosStrip() {
+  const items = ['Ubuntu', 'Debian', 'CentOS', 'Alpine', 'Rocky', 'Arch'];
+  return (
+    <section className="bg-zinc-950">
+      <div className="max-w-6xl mx-auto px-5 py-8">
+        <p className="text-center text-xs uppercase tracking-widest text-zinc-600 mb-5">
+          Работает на любом Linux с systemd
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-x-10 gap-y-4 opacity-70">
+          {items.map((x) => (
+            <span key={x} className="text-sm font-medium text-zinc-500">{x}</span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function Features() {
+  const features = [
+    {
+      icon: Network,
+      title: 'Ловушки на портах',
+      description: 'SSH, HTTP, FTP, MySQL — на случайных high-портах. Любой коннект = аномалия = алерт.',
+    },
+    {
+      icon: FileWarning,
+      title: 'File canary',
+      description: 'inotify-мониторинг чувствительных файлов (.env, id_rsa) и подкинутых приманок в /root, /tmp.',
+    },
+    {
+      icon: Bell,
+      title: 'Telegram-алерты',
+      description: 'Свой бот, свой chat. Подробное событие + цепочка атак при score ≥ 50.',
+    },
+    {
+      icon: Brain,
+      title: 'AI на выбор',
+      description: 'Claude, GPT-4o или Gemini — твой ключ, твой счёт. Можно не подключать вообще.',
+    },
+    {
+      icon: Gauge,
+      title: 'Авто-бан в iptables',
+      description: 'Threshold + эскалация: 3 хита за 5 мин — бан на час, повтор — на сутки. Persistent.',
+    },
+    {
+      icon: Lock,
+      title: 'Zero trust by design',
+      description: 'Никакого центрального сервера. Все секреты — у тебя на машине. Полностью open-source.',
+    },
+  ];
+
+  return (
+    <section id="features" className="relative py-24 md:py-32 border-t border-zinc-900/80">
+      <div className="max-w-6xl mx-auto px-5">
+        <Reveal>
+          <div className="max-w-2xl mx-auto text-center">
+            <JapaneseDivider kanji="技" label="Capabilities" />
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
+              Всё, что нужно для раннего обнаружения вторжений
+            </h2>
+            <p className="mt-4 text-zinc-400 leading-relaxed">
+              Атаки на серверы начинаются не с эксплойта, а со сканирования. GORONIN ловит именно этот момент —
+              когда кто-то только пытается найти слабое место.
+            </p>
+          </div>
+        </Reveal>
+
+        <div className="mt-14 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {features.map((f, i) => (
+            <FeatureCard key={f.title} {...f} delay={i * 0.05} />
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function HowItWorks() {
+  const steps = [
+    {
+      num: '01',
+      title: 'Запусти install.sh',
+      description: 'Одна команда от root. Скрипт скачает бинарь под твою arch и запустит wizard.',
+    },
+    {
+      num: '02',
+      title: 'Ответь на вопросы',
+      description: 'Telegram bot token + chat_id, AI-провайдер (опционально), какие ловушки включить, whitelist IP.',
+    },
+    {
+      num: '03',
+      title: 'Получай алерты',
+      description: 'Wizard поднимет systemd-сервис. Через минуту — тестовое сообщение в Telegram. Готово.',
+    },
+  ];
+
+  return (
+    <section id="how" className="relative py-24 md:py-32 border-t border-zinc-900/80">
+      <div className="max-w-6xl mx-auto px-5">
+        <Reveal>
+          <div className="text-center max-w-2xl mx-auto">
+            <JapaneseDivider kanji="歩" label="The Path" />
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
+              Три шага до защиты
+            </h2>
+          </div>
+        </Reveal>
+
+        <div className="mt-14 grid grid-cols-1 md:grid-cols-3 gap-5 md:gap-8 relative">
+          <div className="hidden md:block absolute top-9 left-[16%] right-[16%] h-px bg-gradient-to-r from-transparent via-zinc-800 to-transparent" />
+          {steps.map((s, i) => (
+            <Reveal key={s.num} delay={i * 0.08}>
+              <div className="relative">
+                <div className="w-[72px] h-[72px] rounded-2xl border border-zinc-800 bg-zinc-900/60 backdrop-blur flex items-center justify-center mb-5 mx-auto">
+                  <span className="text-2xl font-mono font-semibold text-zinc-300 tracking-tight">
+                    {s.num}
+                  </span>
+                </div>
+                <h3 className="text-lg font-semibold text-center text-zinc-100 mb-2">{s.title}</h3>
+                <p className="text-sm text-zinc-400 leading-relaxed text-center max-w-xs mx-auto">
+                  {s.description}
+                </p>
+              </div>
+            </Reveal>
+          ))}
+        </div>
+
+        <Reveal delay={0.2}>
+          <div id="install" className="mt-14 max-w-2xl mx-auto">
+            <InstallCommand />
+            <p className="mt-3 text-center text-xs text-zinc-500">
+              После установки доступны команды: <code className="text-zinc-400">goronin status | logs -f | restart | unban &lt;ip&gt; | reconfigure</code>
+            </p>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function DemoSection() {
+  return (
+    <section className="relative py-24 md:py-32 border-t border-zinc-900/80 overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] bg-emerald-500/5 blur-[120px] rounded-full" />
+      </div>
+      <KanjiWatermark
+        char="眼"
+        className="right-[2%] top-[10%] text-[160px] md:text-[240px] hidden md:block"
+        target={0.03}
+      />
+
+      <div className="relative max-w-3xl mx-auto px-5 text-center">
+        <Reveal>
+          <JapaneseDivider kanji="眼" label="The Eye" />
+          <h2 className="text-3xl md:text-4xl font-semibold tracking-tight leading-tight">
+            Так выглядит алерт
+          </h2>
+          <p className="mt-4 text-zinc-400 leading-relaxed">
+            Каждое событие — IP, порт, время, что сделал автобан, и (если подключил AI) короткий разбор от Claude / GPT / Gemini.
+            Цепочки атак от одного IP объединяются в отдельный alert при score ≥ 50.
+          </p>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function FAQ() {
+  const items = [
+    {
+      q: 'Это правда полностью open-source? Никакого SaaS?',
+      a: 'Да. Один Go-бинарь, MIT-лицензия. Нет бэкенда, нет аккаунтов, нет телеметрии. Все ключи (Telegram bot, AI provider) — твои собственные, лежат на твоём сервере в /etc/goronin/config.yml (mode 0600).',
+    },
+    {
+      q: 'Что именно делает агент?',
+      a: '1) Поднимает honeypot-ловушки на случайных high-портах (SSH/HTTP/FTP/MySQL). 2) Через inotify следит за чувствительными файлами и созданными канарейками. 3) При попадании в ловушку — пишет в локальный bbolt, считает hits per IP, банит через iptables (с эскалацией). 4) Шлёт алерт в Telegram, опционально с AI-разбором.',
+    },
+    {
+      q: 'Какой AI-провайдер выбрать?',
+      a: 'Любой из трёх: Anthropic Claude, OpenAI GPT-4o, Google Gemini. Wizard спросит при установке. Можно вообще без AI — алерты будут приходить, просто без объяснительного абзаца.',
+    },
+    {
+      q: 'Безопасно ли запускать curl | sudo bash?',
+      a: 'Скрипт короткий, читай его перед запуском: github.com/kitay-sudo/goronin/blob/main/install.sh. Он только определяет архитектуру, скачивает бинарь из GitHub Releases и запускает интерактивный wizard. Никаких внешних серверов кроме github.com.',
+    },
+    {
+      q: 'Влияет ли агент на производительность?',
+      a: 'Бинарь ~10 МБ, RAM в простое < 30 МБ, CPU около нуля. Ловушки — обычные TCP-listeners на high-портах, ничего тяжёлого. bbolt-файл состояния занимает килобайты.',
+    },
+    {
+      q: 'Что если я не хочу автобан?',
+      a: 'В wizard выбери mode = "off" (только алерты, iptables не трогается) или "alert_only" (логировать что забанилось бы, но не банить — dry-run для первой недели). Permission-mode "enforce" — production-режим с реальным баном.',
+    },
+    {
+      q: 'А если сервер перезагрузится?',
+      a: 'Активные баны и счётчики hits переживают reboot — всё хранится в /var/lib/goronin/state.db (bbolt). systemd запустит сервис автоматически.',
+    },
+    {
+      q: 'Можно ли поставить на несколько серверов?',
+      a: 'Да, ставь на любое количество. Каждый сервер — независимый агент со своим конфигом и своим Telegram chat (можно один и тот же chat для всех — алерты будут содержать имя сервера).',
+    },
+  ];
+
+  return (
+    <section id="faq" className="py-24 md:py-32 border-t border-zinc-900/80">
+      <div className="max-w-3xl mx-auto px-5">
+        <Reveal>
+          <div className="text-center">
+            <JapaneseDivider kanji="問" label="Questions" />
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
+              Ответы на самое важное
+            </h2>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.1}>
+          <div className="mt-10">
+            {items.map((it) => (
+              <FAQItem key={it.q} question={it.q} answer={it.a} />
+            ))}
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function CTA() {
+  return (
+    <section className="relative py-24 md:py-32 border-t border-zinc-900/80 overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[400px] bg-emerald-500/10 blur-[120px] rounded-full" />
+      </div>
+      <div className="relative max-w-3xl mx-auto px-5 text-center">
+        <Reveal>
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-400 mb-6">
+            <Swords size={26} />
+          </div>
+          <h2 className="text-3xl md:text-5xl font-semibold tracking-tight leading-tight">
+            Поставь стража.<br />
+            <span className="bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">
+              Узнай, кто ломится к тебе сейчас.
+            </span>
+          </h2>
+          <p className="mt-5 text-zinc-400 max-w-xl mx-auto">
+            60 секунд от curl до первого алерта в Telegram.
+          </p>
+
+          <div className="mt-8 max-w-2xl mx-auto">
+            <InstallCommand />
+          </div>
+
+          <div className="mt-5 flex items-center justify-center">
+            <a
+              href={REPO_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 text-zinc-300 hover:text-zinc-100 border border-zinc-800 hover:border-zinc-700 rounded-xl px-5 py-3 transition-colors"
+            >
+              <Github size={16} />
+              Посмотреть код на GitHub
+            </a>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="border-t border-zinc-900/80 py-10">
+      <div className="max-w-6xl mx-auto px-5 flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-2 text-sm text-zinc-500">
+          <span>GORONIN · MIT · © {new Date().getFullYear()}</span>
+          <span className="text-zinc-700">·</span>
+          <a
+            href="https://github.com/kitay-sudo"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 text-zinc-500 hover:text-emerald-400 transition-colors"
+          >
+            by <Github size={12} /> kitay-sudo
+          </a>
+        </div>
+        <div className="flex items-center gap-5 text-sm text-zinc-500">
+          <a href="#features" className="hover:text-zinc-300 transition-colors">Возможности</a>
+          <a href="#install" className="hover:text-zinc-300 transition-colors">Установка</a>
+          <a href="#faq" className="hover:text-zinc-300 transition-colors">FAQ</a>
+          <a href={REPO_URL} target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors flex items-center gap-1.5">
+            <Github size={14} /> GitHub
+          </a>
+        </div>
+      </div>
+    </footer>
+  );
+}

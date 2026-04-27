@@ -1,0 +1,217 @@
+// Package telegram is the only output channel for the standalone agent.
+// All alerts (per-event, attack-chain, agent-up/down) flow through Send.
+//
+// Construction is pure (no I/O); Send is a single HTTP POST. The wizard
+// validates credentials with Verify() before writing the config.
+package telegram
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/kitay-sudo/goronin/agent/internal/config"
+	"github.com/kitay-sudo/goronin/agent/pkg/protocol"
+)
+
+const apiBase = "https://api.telegram.org"
+
+// Client is a minimal Telegram Bot API client. Single bot, single chat —
+// no need for user lists or polling, this is one-way notifications only.
+type Client struct {
+	botToken string
+	chatID   string
+	http     *http.Client
+	baseURL  string // override for tests
+}
+
+// New constructs a client. baseURL is set to the production endpoint;
+// tests can swap it via NewWithBaseURL.
+func New(cfg config.TelegramConfig) *Client {
+	return NewWithBaseURL(cfg, apiBase)
+}
+
+// NewWithBaseURL is for tests: point the client at httptest.Server.URL.
+func NewWithBaseURL(cfg config.TelegramConfig, baseURL string) *Client {
+	return &Client{
+		botToken: cfg.BotToken,
+		chatID:   cfg.ChatID,
+		http:     &http.Client{Timeout: 10 * time.Second},
+		baseURL:  baseURL,
+	}
+}
+
+// Send posts an HTML-formatted message to the configured chat.
+func (c *Client) Send(ctx context.Context, html string) error {
+	url := fmt.Sprintf("%s/bot%s/sendMessage", c.baseURL, c.botToken)
+	body, _ := json.Marshal(map[string]string{
+		"chat_id":    c.chatID,
+		"text":       html,
+		"parse_mode": "HTML",
+	})
+	req, _ := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return fmt.Errorf("telegram send: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		raw, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("telegram HTTP %d: %s", resp.StatusCode, string(raw))
+	}
+	return nil
+}
+
+// Verify hits getMe to confirm the bot token is valid. Used by the wizard.
+// Returns the bot's username on success.
+func (c *Client) Verify(ctx context.Context) (string, error) {
+	url := fmt.Sprintf("%s/bot%s/getMe", c.baseURL, c.botToken)
+	req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("telegram verify: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("telegram HTTP %d: %s", resp.StatusCode, string(raw))
+	}
+	var parsed struct {
+		OK     bool `json:"ok"`
+		Result struct {
+			Username string `json:"username"`
+		} `json:"result"`
+		Description string `json:"description"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return "", err
+	}
+	if !parsed.OK {
+		return "", fmt.Errorf("telegram api: %s", parsed.Description)
+	}
+	return parsed.Result.Username, nil
+}
+
+// ---------- formatters ----------
+
+var typeLabels = map[string]string{
+	protocol.EventSSHTrap:    "🔒 SSH ловушка",
+	protocol.EventHTTPTrap:   "🌐 HTTP ловушка",
+	protocol.EventFTPTrap:    "📁 FTP ловушка",
+	protocol.EventDBTrap:     "🗄 DB ловушка",
+	protocol.EventFileCanary: "📄 Файловая ловушка",
+}
+
+var typeLabelsShort = map[string]string{
+	protocol.EventSSHTrap:    "SSH trap",
+	protocol.EventHTTPTrap:   "HTTP trap",
+	protocol.EventFTPTrap:    "FTP trap",
+	protocol.EventDBTrap:     "DB trap",
+	protocol.EventFileCanary: "File canary",
+}
+
+// FormatEventAlert builds the per-event message. aiAnalysis is optional.
+func FormatEventAlert(serverName string, ev protocol.EventRequest, aiAnalysis string) string {
+	label, ok := typeLabels[ev.Type]
+	if !ok {
+		label = ev.Type
+	}
+	t := ev.CreatedAt.In(mustTZ()).Format("02.01.2006 15:04:05 MST")
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "🚨 <b>HONEYPOT ALERT — %s</b>\n\n", htmlEscape(serverName))
+	fmt.Fprintf(&b, "⚠️ Событие: %s\n", label)
+	fmt.Fprintf(&b, "🌍 IP: <code>%s</code>\n", htmlEscape(ev.SourceIP))
+	if ev.TrapPort > 0 {
+		fmt.Fprintf(&b, "🎯 Порт ловушки: %d\n", ev.TrapPort)
+	}
+	fmt.Fprintf(&b, "🕐 Время: %s\n", t)
+	if action, ok := ev.Details[protocol.DetailActionTaken]; ok {
+		fmt.Fprintf(&b, "🛡 Действие: %s\n", htmlEscape(action))
+	}
+	if aiAnalysis != "" {
+		fmt.Fprintf(&b, "\n🤖 <b>AI анализ:</b>\n%s\n", htmlEscape(aiAnalysis))
+	}
+	return b.String()
+}
+
+// FormatChainAlert builds the attack-chain summary.
+func FormatChainAlert(serverName, sourceIP string, score int, events []protocol.EventRequest, aiAnalysis string) string {
+	sorted := make([]protocol.EventRequest, len(events))
+	copy(sorted, events)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].CreatedAt.Before(sorted[j].CreatedAt) })
+
+	first, last := sorted[0], sorted[len(sorted)-1]
+	spanSec := int(last.CreatedAt.Sub(first.CreatedAt).Seconds())
+	uniqTypes := map[string]struct{}{}
+	for _, ev := range sorted {
+		uniqTypes[ev.Type] = struct{}{}
+	}
+
+	severity := "СРЕДНЯЯ"
+	switch {
+	case score >= 80:
+		severity = "КРИТИЧЕСКАЯ"
+	case score >= 60:
+		severity = "ВЫСОКАЯ"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "🚨 <b>ATTACK CHAIN — %s</b>\n", htmlEscape(serverName))
+	fmt.Fprintf(&b, "🎯 Оценка: <b>%d/100</b> — угроза: <b>%s</b>\n\n", score, severity)
+	fmt.Fprintf(&b, "🌍 IP: <code>%s</code>\n", htmlEscape(sourceIP))
+	fmt.Fprintf(&b, "📊 Событий: %d (%d типов) за %dс\n\n", len(sorted), len(uniqTypes), spanSec)
+	b.WriteString("<b>Timeline:</b>\n")
+	for _, ev := range sorted {
+		t := ev.CreatedAt.In(mustTZ()).Format("15:04:05")
+		label, ok := typeLabelsShort[ev.Type]
+		if !ok {
+			label = ev.Type
+		}
+		extra := ""
+		if f, ok := ev.Details["file"]; ok {
+			extra = " (" + htmlEscape(f) + ")"
+		}
+		marker := ""
+		if ev.Details[protocol.DetailActionTaken] == "blocked" {
+			marker = " 🛡"
+		}
+		fmt.Fprintf(&b, "  %s  %s%s%s\n", t, label, extra, marker)
+	}
+	if aiAnalysis != "" {
+		fmt.Fprintf(&b, "\n🤖 <b>AI анализ цепочки:</b>\n%s\n", htmlEscape(aiAnalysis))
+	}
+	return b.String()
+}
+
+// FormatAgentStartup is sent when goronin starts. Confirms to the operator
+// that traps are listening.
+func FormatAgentStartup(serverName string, traps []string) string {
+	t := time.Now().In(mustTZ()).Format("02.01.2006 15:04:05 MST")
+	return fmt.Sprintf("✅ <b>GORONIN запущен — %s</b>\n\nЛовушки: %s\nВремя: %s",
+		htmlEscape(serverName), htmlEscape(strings.Join(traps, ", ")), t)
+}
+
+// htmlEscape escapes the four chars Telegram's HTML parser cares about.
+func htmlEscape(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
+	return r.Replace(s)
+}
+
+// mustTZ returns Europe/Moscow if available, UTC otherwise. Telegram messages
+// show local times to the operator — Moscow is the dominant timezone for the
+// target user base; ops in other zones can still parse the offset from MST.
+func mustTZ() *time.Location {
+	if loc, err := time.LoadLocation("Europe/Moscow"); err == nil {
+		return loc
+	}
+	return time.UTC
+}

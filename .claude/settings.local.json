@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(docker compose *)",
+      "Bash(DATABASE_URL=postgresql://vanta:vanta_secret@localhost:5433/vanta_test npm run test:integration)",
+      "Bash(go mod *)",
+      "Bash(go get *)",
+      "Bash(go test *)",
+      "Bash(go build *)",
+      "Bash(docker run *)",
+      "Bash(docker rm *)",
+      "Bash(DATABASE_URL=postgresql://vanta:vanta_secret@localhost:5434/vanta npm run migrate)",
+      "Bash(DATABASE_URL=postgresql://vanta:vanta_secret@localhost:5434/vanta PORT=3001 node src/server.js)",
+      "Bash(pkill -f \"node src/server.js\")",
+      "Bash(docker stop *)",
+      "Bash(mv VANTA_CONCEPT.md docs/)",
+      "Bash(mv PROJECT_LAYOUT.md docs/)",
+      "Bash(npx vite *)",
+      "Bash(node src/server.js)",
+      "Bash(xargs cat *)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:starship.rs)",
+      "Bash(node --test tests/unit/chainAnalysis.test.js)",
+      "Bash(node --test tests/unit/*.test.js)",
+      "Bash(go vet *)",
+      "Bash(DATABASE_URL=postgresql://vanta:vanta_secret@localhost:5433/vanta_test node --test tests/integration/api.test.js)",
+      "Bash(whois khufu.com)",
+      "WebFetch(domain:rdap.org)",
+      "Bash(xargs grep *)",
+      "Bash(sed -i -e 's|POSTGRES_DB: vanta_test|POSTGRES_DB: goronin_test|g' -e 's|POSTGRES_DB: vanta|POSTGRES_DB: goronin|g' -e 's|POSTGRES_USER: vanta|POSTGRES_USER: goronin|g' -e 's|POSTGRES_PASSWORD: vanta_secret|POSTGRES_PASSWORD: goronin_secret|g' -e 's|pg_isready -U vanta|pg_isready -U goronin|g' -e 's|postgresql://vanta:vanta_secret@postgres:5432/vanta|postgresql://goronin:goronin_secret@postgres:5432/goronin|g' docker-compose.yml docker-compose.test.yml)",
+      "Bash(sed -i -e 's|postgresql://vanta:vanta_secret@127.0.0.1:5432/vanta|postgresql://goronin:goronin_secret@127.0.0.1:5432/goronin|g' -e 's|POSTGRES_PASSWORD=vanta_secret|POSTGRES_PASSWORD=goronin_secret|g' -e 's|https://get.vanta.io|https://get.goronin.ru|g' -e 's|https://api.vanta.io|https://api.goronin.ru|g' .env.example)",
+      "Bash(sed -i 's|^agent/vanta$|agent/goronin|' .gitignore)",
+      "Bash(grep -n \"vanta\\\\|VANTA\\\\|Vanta\" docker-compose.yml docker-compose.test.yml .env.example .gitignore)",
+      "Read(//tmp/**)"
+    ]
+  }
+}
