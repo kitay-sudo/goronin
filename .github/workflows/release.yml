@@ -1,0 +1,104 @@
+# Release — собирает релизные бинари и публикует GitHub Release.
+#
+# Триггер: push тега, начинающегося с `v` (например v0.1.0).
+#
+# Делает:
+#   1. matrix-сборка для linux/amd64 и linux/arm64
+#   2. имена артефактов: goronin-linux-amd64, goronin-linux-arm64
+#   3. version-stamp через -ldflags "-X main.version=$TAG", -s -w для размера
+#   4. SHA256SUMS.txt — для верификации скачанного бинаря
+#   5. публикует Release с автогенерируемыми notes (берёт из commits с прошлого тега)
+#
+# install.sh ждёт ровно эти имена файлов в Release — не менять без обновления install.sh.
+
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # нужно для создания Release и upload assets
+
+jobs:
+  build:
+    name: build ${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+            artifact: goronin-linux-amd64
+          - goarch: arm64
+            artifact: goronin-linux-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+          cache-dependency-path: agent/go.sum
+
+      - name: Build
+        working-directory: agent
+        env:
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          go build \
+            -trimpath \
+            -ldflags "-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o "../${{ matrix.artifact }}" \
+            ./cmd/goronin
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # нужно для release-notes по полной истории
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum goronin-linux-* > SHA256SUMS.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            dist/goronin-linux-amd64
+            dist/goronin-linux-arm64
+            dist/SHA256SUMS.txt
+          body: |
+            ## Установка
+
+            ```bash
+            curl -sSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash
+            ```
+
+            Или вручную: скачай бинарь под свою архитектуру, проверь хэш через `SHA256SUMS.txt`, положи в `/usr/local/bin/goronin` и запусти `sudo goronin install`.
+
+            ---

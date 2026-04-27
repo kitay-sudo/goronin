@@ -1,0 +1,69 @@
+# CI — проверки на каждый push и PR.
+#
+# Что делает: vet, test, build (только проверка что собирается). Никаких
+# артефактов и релизов не создаёт — это работа release.yml на тег v*.
+#
+# Цель: не дать смерджить/протегать сломанный код.
+
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+    tags-ignore: ["v*"] # релизные теги обрабатывает release.yml
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  agent:
+    name: agent (Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+          cache-dependency-path: agent/go.sum
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race -timeout=2m ./...
+
+      - name: build linux/amd64
+        run: GOOS=linux GOARCH=amd64 go build -ldflags "-s -w" -o /tmp/goronin-amd64 ./cmd/goronin
+
+      - name: build linux/arm64
+        run: GOOS=linux GOARCH=arm64 go build -ldflags "-s -w" -o /tmp/goronin-arm64 ./cmd/goronin
+
+  frontend:
+    name: frontend (Vite)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        run: npm ci
+
+      - name: build
+        run: npm run build
