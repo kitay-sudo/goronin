@@ -9,10 +9,10 @@ name: ci
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
     tags-ignore: ["v*"] # релизные теги обрабатывает release.yml
   pull_request:
-    branches: [main, master]
+    branches: [main]
 
 permissions:
   contents: read
