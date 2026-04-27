@@ -195,15 +195,23 @@ goronin/
 
 ## Roadmap
 
+### v0.1.0 — текущий релиз
+
 - [x] Standalone-агент без бэкенда
 - [x] 3 AI-провайдера (Anthropic / OpenAI / Gemini)
 - [x] Persistent firewall blocks через bbolt
-- [x] Threshold-based auto-ban + alert_only mode
+- [x] Threshold-based auto-ban (off / alert_only / enforce)
 - [x] Interactive install wizard
-- [x] systemd integration + CLI обёртки
-- [ ] Real SSH honeypot на `golang.org/x/crypto/ssh` (логирование пар user/pass)
-- [ ] GitHub Actions: cross-compile + auto-release бинарей
-- [ ] Поддержка nftables (для дистрибутивов без iptables)
+- [x] systemd integration + CLI обёртки (start/stop/restart/logs/unban/reset)
+- [x] Cross-compile в CI: linux/amd64 + linux/arm64 release-бинари
+
+### Дальше
+
+- [ ] **Debounce + батчинг алертов.** Сейчас на каждый коннект к ловушке — отдельный AI-вызов и Telegram-сообщение; при сканировании в 30 коннектов получаем 30 запросов. План: окно 5 минут на ключ `(тип, IP)`, первое событие → сразу alert, последующие копятся → один summary в конце окна.
+- [ ] **Real SSH honeypot на `golang.org/x/crypto/ssh`.** Сейчас SSH-trap отдаёт баннер и закрывает коннект — мы не видим что пытался ввести бот. С crypto/ssh будем логировать пары `(username, password)` и публичные ключи.
+- [ ] **Поддержка nftables.** Для новых дистрибутивов (Fedora 40+, RHEL 9+, Debian 12+) где iptables помечен deprecated.
+- [ ] **e2e-проверка install.sh в CI.** Раз в неделю прогонять `curl ... | bash` в Docker — страховка чтобы установка не сломалась незаметно.
+- [ ] **Релиз-бинари для macOS/Windows.** Для локальной разработки и тестов перед прод-установкой (без systemd, в foreground-режиме).
 
 ---
 

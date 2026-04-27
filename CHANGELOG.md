@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Planned
+
+- Debounce + батчинг алертов (см. roadmap в README) — снизит количество AI-вызовов и Telegram-сообщений при сканировании в ~15 раз.
+- Real SSH honeypot на `golang.org/x/crypto/ssh` — логирование пар `(username, password)` и публичных ключей.
+
 ## [0.1.0] — 2026-04-27
 
 Первый open-source релиз. GORONIN перерождён как полностью standalone-агент: один Go-бинарь, никакого центрального бэкенда.
