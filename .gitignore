@@ -5,6 +5,7 @@ dist/
 .env.*
 !.env.example
 coverage/
+docs/
 
 # --- Go agent ---
 # собранные бинари не коммитим — релизит CI
@@ -30,6 +31,7 @@ Thumbs.db
 # --- IDE ---
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 
