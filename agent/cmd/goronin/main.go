@@ -18,13 +18,14 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/kitay-sudo/goronin/agent/internal/aggregator"
 	"github.com/kitay-sudo/goronin/agent/internal/ai"
 	"github.com/kitay-sudo/goronin/agent/internal/alerter"
 	"github.com/kitay-sudo/goronin/agent/internal/config"
-	"github.com/kitay-sudo/goronin/agent/internal/correlator"
 	"github.com/kitay-sudo/goronin/agent/internal/firewall"
 	"github.com/kitay-sudo/goronin/agent/internal/storage"
 	"github.com/kitay-sudo/goronin/agent/internal/systemd"
@@ -182,9 +183,18 @@ func runDaemon() {
 		log.Fatalf("[goronin] init ai: %v", err)
 	}
 
-	// Correlator + alerter glue everything together.
-	corr := correlator.New(0) // 0 → default 30 min window
-	al := alerter.New(cfg.ServerName, corr, provider, tg)
+	// Alerter is the AI/Telegram routing layer. In v0.2+ it receives
+	// aggregated batches via FlushBatch; only file-canary events use the
+	// instant bypass HandleInstant.
+	al := alerter.New(cfg.ServerName, provider, tg)
+
+	// Aggregator: 5-min urgent + 1-hour background, tunable via config.
+	agg := aggregator.New(aggregator.Config{
+		UrgentWindow:      cfg.Alerting.UrgentWindow,
+		BackgroundWindow:  cfg.Alerting.BackgroundWindow,
+		InterestThreshold: cfg.Alerting.InterestThreshold,
+	}, al.FlushBatch)
+	defer agg.Stop()
 
 	// Firewall: persistent blocks, threshold-based RecordHit.
 	fw := firewall.New(cfg.WhitelistIPs, firewall.RealExecutor{}).
@@ -199,9 +209,11 @@ func runDaemon() {
 	fw.Start()
 	defer fw.Shutdown()
 
-	// onEvent: every trap/watcher event flows through here. Firewall acts
-	// first (so the alert reflects what we actually did), then alerter
-	// formats and sends.
+	// onEvent: every trap/watcher event flows through here. Firewall reaction
+	// runs first (so the alert reflects what we actually did). Then the
+	// event is routed:
+	//   - file-canary write/remove → al.HandleInstant (bypass aggregator)
+	//   - everything else          → agg.Observe (5-min batching)
 	onEvent := func(ev protocol.EventRequest) {
 		if ev.Details == nil {
 			ev.Details = map[string]string{}
@@ -211,7 +223,15 @@ func runDaemon() {
 			ev.Details[protocol.DetailActionTaken] = string(result)
 			ev.Details[protocol.DetailBlockReason] = ev.Type
 		}
-		al.Handle(ev)
+
+		// File canary on a write/remove is a 100% real attack — don't wait
+		// 5 minutes to alert. Read events still go through the aggregator
+		// because read can be a false positive (cron, backups).
+		if isInstantEvent(ev) {
+			al.HandleInstant(ev)
+			return
+		}
+		agg.Observe(ev)
 	}
 
 	// Traps.
@@ -254,6 +274,18 @@ func runDaemon() {
 
 	log.Println("[goronin] shutting down")
 	tm.StopAll()
+}
+
+// isInstantEvent reports whether an event should bypass the aggregator
+// and trigger an immediate Telegram alert. Right now: file_canary write/
+// remove operations. A canary read might be a false positive (cron job,
+// backup tool) so it still goes through the 5-minute window.
+func isInstantEvent(ev protocol.EventRequest) bool {
+	if ev.Type != protocol.EventFileCanary {
+		return false
+	}
+	op := ev.Details["operation"]
+	return strings.Contains(op, "WRITE") || strings.Contains(op, "REMOVE")
 }
 
 func labelOf(typ string) string {

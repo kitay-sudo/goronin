@@ -24,11 +24,21 @@ import (
 )
 
 // Provider is the common contract. AnalyzeEvent describes a single event;
-// AnalyzeChain describes a sequence of related events from one IP.
-// Both return a short Russian-language paragraph or "" if AI is disabled.
+// AnalyzeChain describes a sequence of related events from one IP;
+// AnalyzeBatch describes an aggregated 5-minute window across many IPs
+// (preferred entry point in the v0.2+ flow — one LLM call per window).
+// All return a short Russian-language paragraph or "" if AI is disabled.
 type Provider interface {
 	AnalyzeEvent(ctx context.Context, ev protocol.EventRequest) (string, error)
 	AnalyzeChain(ctx context.Context, sourceIP string, score int, events []protocol.EventRequest) (string, error)
+	AnalyzeBatch(ctx context.Context, totalScore int, ipGroups []BatchGroup) (string, error)
+}
+
+// BatchGroup is one source-IP slice of an aggregated batch sent to AnalyzeBatch.
+type BatchGroup struct {
+	SourceIP string
+	Score    int
+	Events   []protocol.EventRequest
 }
 
 // New constructs a Provider from config. Unknown provider names return an
@@ -66,6 +76,8 @@ const eventSystemPrompt = `Ты — эксперт по кибербезопас
 
 const chainSystemPrompt = `Ты — эксперт по кибербезопасности. На входе — цепочка связанных событий с honeypot'ов от одного IP. Дай оценку атаки на русском (5-7 предложений): что делает атакующий, на какой стадии, что удалось/не удалось, что сделать НЕМЕДЛЕННО (помимо автоблокировки IP). Будь краток.`
 
+const batchSystemPrompt = `Ты — эксперт по кибербезопасности. На входе — агрегированная активность за окно (5 минут) на сервере: несколько IP, у каждого свои события. Все источники уже автоматически забанены в iptables. Дай краткий разбор на русском (4-6 предложений): какой характер у каждой группы (массовый сканер / целевая атака / ботнет / шум), есть ли среди них что-то выделяющееся, требуется ли действие от владельца сервера сверх автобана. Будь конкретен, без общих фраз. Не повторяй цифры — они уже в Telegram-сообщении.`
+
 func eventUserPrompt(ev protocol.EventRequest) string {
 	details, _ := json.Marshal(ev.Details)
 	return fmt.Sprintf("Событие:\n- Тип: %s\n- IP: %s\n- Порт ловушки: %d\n- Детали: %s\n- Время: %s",
@@ -87,6 +99,28 @@ func chainUserPrompt(sourceIP string, score int, events []protocol.EventRequest)
 	return b.String()
 }
 
+// batchUserPrompt builds the LLM input for an aggregated 5-minute window.
+// Each IP gets one section with the score and a per-type event count;
+// individual event details are summarised, not enumerated, to keep token
+// spend bounded even on large bursts.
+func batchUserPrompt(totalScore int, groups []BatchGroup) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Окно: 5 мин · IP: %d · Общая угроза: %d/100\n\n", len(groups), totalScore)
+	for _, g := range groups {
+		typeCount := map[string]int{}
+		for _, ev := range g.Events {
+			typeCount[ev.Type]++
+		}
+		var parts []string
+		for t, n := range typeCount {
+			parts = append(parts, fmt.Sprintf("%s×%d", t, n))
+		}
+		sort.Strings(parts)
+		fmt.Fprintf(&b, "IP %s — score %d — %s\n", g.SourceIP, g.Score, strings.Join(parts, ", "))
+	}
+	return b.String()
+}
+
 // ---------- noop ----------
 
 type noopProvider struct{}
@@ -95,6 +129,9 @@ func (noopProvider) AnalyzeEvent(context.Context, protocol.EventRequest) (string
 	return "", nil
 }
 func (noopProvider) AnalyzeChain(context.Context, string, int, []protocol.EventRequest) (string, error) {
+	return "", nil
+}
+func (noopProvider) AnalyzeBatch(context.Context, int, []BatchGroup) (string, error) {
 	return "", nil
 }
 
@@ -165,6 +202,9 @@ func (p *anthropicProvider) AnalyzeEvent(ctx context.Context, ev protocol.EventR
 func (p *anthropicProvider) AnalyzeChain(ctx context.Context, ip string, score int, events []protocol.EventRequest) (string, error) {
 	return p.call(ctx, chainSystemPrompt, chainUserPrompt(ip, score, events), 500)
 }
+func (p *anthropicProvider) AnalyzeBatch(ctx context.Context, totalScore int, groups []BatchGroup) (string, error) {
+	return p.call(ctx, batchSystemPrompt, batchUserPrompt(totalScore, groups), 400)
+}
 
 // ---------- OpenAI ----------
 
@@ -232,6 +272,9 @@ func (p *openaiProvider) AnalyzeEvent(ctx context.Context, ev protocol.EventRequ
 }
 func (p *openaiProvider) AnalyzeChain(ctx context.Context, ip string, score int, events []protocol.EventRequest) (string, error) {
 	return p.call(ctx, chainSystemPrompt, chainUserPrompt(ip, score, events), 500)
+}
+func (p *openaiProvider) AnalyzeBatch(ctx context.Context, totalScore int, groups []BatchGroup) (string, error) {
+	return p.call(ctx, batchSystemPrompt, batchUserPrompt(totalScore, groups), 400)
 }
 
 // ---------- Gemini ----------
@@ -303,4 +346,7 @@ func (p *geminiProvider) AnalyzeEvent(ctx context.Context, ev protocol.EventRequ
 }
 func (p *geminiProvider) AnalyzeChain(ctx context.Context, ip string, score int, events []protocol.EventRequest) (string, error) {
 	return p.call(ctx, chainSystemPrompt, chainUserPrompt(ip, score, events), 500)
+}
+func (p *geminiProvider) AnalyzeBatch(ctx context.Context, totalScore int, groups []BatchGroup) (string, error) {
+	return p.call(ctx, batchSystemPrompt, batchUserPrompt(totalScore, groups), 400)
 }

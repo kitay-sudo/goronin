@@ -192,6 +192,80 @@ func FormatChainAlert(serverName, sourceIP string, score int, events []protocol.
 	return b.String()
 }
 
+// IPSummary is one row of a batched alert.
+type IPSummary struct {
+	IP         string
+	Score      int
+	EventCount int
+	Types      []string // distinct trap types this IP hit, ordered by name
+}
+
+// FormatBatchAlert produces the urgent 5-minute sweep message: "за окно
+// было N событий с M IP, вот разбивка". aiAnalysis is optional — empty
+// means "no AI was called for this batch".
+func FormatBatchAlert(serverName string, totalScore, eventCount int, windowMinutes int, summaries []IPSummary, aiAnalysis string) string {
+	severity := "СРЕДНЯЯ"
+	switch {
+	case totalScore >= 80:
+		severity = "КРИТИЧЕСКАЯ"
+	case totalScore >= 60:
+		severity = "ВЫСОКАЯ"
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "🚨 <b>GORONIN — %s</b>\n", htmlEscape(serverName))
+	fmt.Fprintf(&b, "Окно: %d мин · Событий: %d · IP: %d\n", windowMinutes, eventCount, len(summaries))
+	fmt.Fprintf(&b, "Общая угроза: <b>%d/100</b> (%s)\n\n", totalScore, severity)
+
+	for _, s := range summaries {
+		marker := scoreMarker(s.Score)
+		fmt.Fprintf(&b, "%s <code>%s</code> — score %d — %s×%d\n",
+			marker, htmlEscape(s.IP), s.Score, htmlEscape(strings.Join(s.Types, "/")), s.EventCount)
+	}
+
+	if aiAnalysis != "" {
+		fmt.Fprintf(&b, "\n🤖 <b>AI разбор:</b>\n%s\n", htmlEscape(aiAnalysis))
+	}
+	return b.String()
+}
+
+// FormatBackgroundDigest is the low-noise hourly summary: small numbers,
+// no AI, just "был фон, всё забанено, не отвлекайся".
+func FormatBackgroundDigest(serverName string, eventCount int, windowMinutes int, summaries []IPSummary) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "🔵 <b>Фоновый дайджест — %s</b>\n", htmlEscape(serverName))
+	fmt.Fprintf(&b, "За последние %d мин: %d событий с %d IP, все заблокированы.\n", windowMinutes, eventCount, len(summaries))
+
+	if len(summaries) > 0 {
+		b.WriteString("\nТоп IP:\n")
+		shown := 5
+		if len(summaries) < shown {
+			shown = len(summaries)
+		}
+		for i := 0; i < shown; i++ {
+			s := summaries[i]
+			fmt.Fprintf(&b, "  • <code>%s</code> — %s×%d\n",
+				htmlEscape(s.IP), htmlEscape(strings.Join(s.Types, "/")), s.EventCount)
+		}
+		if len(summaries) > shown {
+			fmt.Fprintf(&b, "  • …и ещё %d IP\n", len(summaries)-shown)
+		}
+	}
+	return b.String()
+}
+
+// scoreMarker maps a per-IP score to a coloured emoji for the batch list.
+func scoreMarker(score int) string {
+	switch {
+	case score >= 70:
+		return "🔴"
+	case score >= 40:
+		return "🟡"
+	default:
+		return "⚪"
+	}
+}
+
 // FormatAgentStartup is sent when goronin starts. Confirms to the operator
 // that traps are listening.
 func FormatAgentStartup(serverName string, traps []string) string {

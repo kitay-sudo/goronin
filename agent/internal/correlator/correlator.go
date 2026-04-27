@@ -89,7 +89,7 @@ func (c *Correlator) Observe(ev protocol.EventRequest) *Chain {
 		c.chains[ev.SourceIP] = chain
 	}
 	chain.Events = append(chain.Events, ev)
-	chain.Score = calculateScore(chain.Events)
+	chain.Score = CalculateScore(chain.Events)
 
 	// Return a copy so callers can read it without holding the lock.
 	cp := *chain
@@ -113,11 +113,11 @@ func (c *Correlator) expireLocked() {
 			continue
 		}
 		chain.Events = fresh
-		chain.Score = calculateScore(fresh)
+		chain.Score = CalculateScore(fresh)
 	}
 }
 
-// calculateScore is the pure scoring function — easy to unit-test.
+// CalculateScore is the pure scoring function — easy to unit-test.
 //
 //	+10 per event
 //	+20 per unique trap type
@@ -125,7 +125,7 @@ func (c *Correlator) expireLocked() {
 //	+20 if 3+ events in under 5 minutes
 //	+pattern.bonus for the highest-matching known pattern (only one applied)
 //	clamped to [0, 100]
-func calculateScore(events []protocol.EventRequest) int {
+func CalculateScore(events []protocol.EventRequest) int {
 	if len(events) == 0 {
 		return 0
 	}

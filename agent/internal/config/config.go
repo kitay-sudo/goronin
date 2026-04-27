@@ -59,6 +59,24 @@ type AutoBanConfig struct {
 	BlockDuration time.Duration `yaml:"block_duration"`
 }
 
+// AlertingConfig controls how events are batched into Telegram messages
+// to keep noise and LLM token spend bounded. See HOW_IT_WORKS.md for the
+// full model. Zero values fall back to the defaults below.
+type AlertingConfig struct {
+	// UrgentWindow: how long to accumulate events before deciding whether
+	// to flush as urgent or move to background. Default 5m.
+	UrgentWindow time.Duration `yaml:"urgent_window"`
+
+	// BackgroundWindow: how long low-score noise accumulates before being
+	// sent as a single hourly digest. Default 1h.
+	BackgroundWindow time.Duration `yaml:"background_window"`
+
+	// InterestThreshold: aggregate score below which an urgent batch is
+	// demoted to the background bucket instead of being sent immediately.
+	// Default 30 (matches the alerter's AI threshold).
+	InterestThreshold int `yaml:"interest_threshold"`
+}
+
 // Config is the top-level on-disk shape.
 type Config struct {
 	ServerName   string         `yaml:"server_name"`
@@ -66,6 +84,7 @@ type Config struct {
 	AI           AIConfig       `yaml:"ai"`
 	Traps        TrapsConfig    `yaml:"traps"`
 	AutoBan      AutoBanConfig  `yaml:"auto_ban"`
+	Alerting     AlertingConfig `yaml:"alerting"`
 	WhitelistIPs []string       `yaml:"whitelist_ips"`
 	WatchFiles   []string       `yaml:"watch_files"`
 	DataDir      string         `yaml:"data_dir"` // default /var/lib/goronin
@@ -95,6 +114,15 @@ func (c *Config) applyDefaults() {
 	}
 	if c.DataDir == "" {
 		c.DataDir = "/var/lib/goronin"
+	}
+	if c.Alerting.UrgentWindow == 0 {
+		c.Alerting.UrgentWindow = 5 * time.Minute
+	}
+	if c.Alerting.BackgroundWindow == 0 {
+		c.Alerting.BackgroundWindow = 1 * time.Hour
+	}
+	if c.Alerting.InterestThreshold == 0 {
+		c.Alerting.InterestThreshold = 30
 	}
 }
 

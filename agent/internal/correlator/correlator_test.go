@@ -29,7 +29,7 @@ func TestScore_BasicCount(t *testing.T) {
 		ev(protocol.EventSSHTrap, "1.1.1.1", now),
 		ev(protocol.EventSSHTrap, "1.1.1.1", now.Add(time.Second)),
 	}
-	score := calculateScore(events)
+	score := CalculateScore(events)
 	// 2*10 (count) + 1*20 (one unique type) = 40
 	if score != 40 {
 		t.Errorf("want 40, got %d", score)
@@ -42,7 +42,7 @@ func TestScore_FileCanaryBonus(t *testing.T) {
 		ev(protocol.EventFileCanary, "1.1.1.1", now),
 	}
 	// 1*10 + 1*20 + 30 (canary) = 60
-	if got := calculateScore(events); got != 60 {
+	if got := CalculateScore(events); got != 60 {
 		t.Errorf("want 60, got %d", got)
 	}
 }
@@ -54,7 +54,7 @@ func TestScore_KnownPatternBonus(t *testing.T) {
 		ev(protocol.EventFileCanary, "1.1.1.1", now.Add(time.Minute)),
 	}
 	// 2*10 + 2*20 + 30 (canary) + 50 (ssh→canary pattern) = 140 → clamped to 100
-	if got := calculateScore(events); got != 100 {
+	if got := CalculateScore(events); got != 100 {
 		t.Errorf("want 100 (clamped), got %d", got)
 	}
 }
@@ -67,7 +67,7 @@ func TestScore_RapidBurstBonus(t *testing.T) {
 		ev(protocol.EventDBTrap, "1.1.1.1", now.Add(20*time.Second)),
 	}
 	// 3*10 + 3*20 + 20 (rapid burst) = 110 → clamped to 100
-	if got := calculateScore(events); got != 100 {
+	if got := CalculateScore(events); got != 100 {
 		t.Errorf("want 100, got %d", got)
 	}
 }

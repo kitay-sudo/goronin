@@ -128,6 +128,101 @@ func TestFormatChainAlert_SeverityBuckets(t *testing.T) {
 	}
 }
 
+func TestFormatBatchAlert_StructureAndAI(t *testing.T) {
+	summaries := []IPSummary{
+		{IP: "1.1.1.1", Score: 70, EventCount: 4, Types: []string{"SSH", "HTTP"}},
+		{IP: "2.2.2.2", Score: 30, EventCount: 1, Types: []string{"FTP"}},
+	}
+	out := FormatBatchAlert("prod-1", 80, 5, 5, summaries, "AI text")
+	for _, want := range []string{
+		"prod-1",
+		"Окно: 5 мин",
+		"Событий: 5",
+		"IP: 2",
+		"80/100",
+		"КРИТИЧЕСКАЯ",
+		"1.1.1.1",
+		"2.2.2.2",
+		"SSH/HTTP",
+		"AI text",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestFormatBatchAlert_NoAIWhenEmpty(t *testing.T) {
+	summaries := []IPSummary{{IP: "1.1.1.1", Score: 20, EventCount: 1, Types: []string{"SSH"}}}
+	out := FormatBatchAlert("srv", 20, 1, 5, summaries, "")
+	if strings.Contains(out, "AI разбор") {
+		t.Errorf("AI section should be omitted when analysis empty:\n%s", out)
+	}
+}
+
+func TestFormatBatchAlert_SeverityBuckets(t *testing.T) {
+	s := []IPSummary{{IP: "1.1.1.1", Score: 50, EventCount: 1, Types: []string{"SSH"}}}
+	cases := []struct{ score int; want string }{
+		{30, "СРЕДНЯЯ"}, {65, "ВЫСОКАЯ"}, {85, "КРИТИЧЕСКАЯ"},
+	}
+	for _, c := range cases {
+		out := FormatBatchAlert("s", c.score, 1, 5, s, "")
+		if !strings.Contains(out, c.want) {
+			t.Errorf("score=%d expected %q in output", c.score, c.want)
+		}
+	}
+}
+
+func TestFormatBackgroundDigest_TopIPsLimited(t *testing.T) {
+	summaries := []IPSummary{
+		{IP: "1.1.1.1", Types: []string{"SSH"}, EventCount: 5},
+		{IP: "2.2.2.2", Types: []string{"HTTP"}, EventCount: 3},
+		{IP: "3.3.3.3", Types: []string{"FTP"}, EventCount: 2},
+		{IP: "4.4.4.4", Types: []string{"DB"}, EventCount: 1},
+		{IP: "5.5.5.5", Types: []string{"SSH"}, EventCount: 1},
+		{IP: "6.6.6.6", Types: []string{"SSH"}, EventCount: 1},
+		{IP: "7.7.7.7", Types: []string{"SSH"}, EventCount: 1},
+	}
+	out := FormatBackgroundDigest("srv", 14, 60, summaries)
+	for _, want := range []string{
+		"Фоновый дайджест",
+		"srv",
+		"60 мин",
+		"14 событий",
+		"7 IP",
+		"1.1.1.1",
+		"5.5.5.5",
+		"и ещё 2 IP", // 7 total, top 5 shown
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "6.6.6.6") || strings.Contains(out, "7.7.7.7") {
+		t.Errorf("entries beyond top 5 should not be listed individually")
+	}
+}
+
+func TestFormatBackgroundDigest_NoIPSection_WhenEmpty(t *testing.T) {
+	out := FormatBackgroundDigest("srv", 0, 60, nil)
+	if strings.Contains(out, "Топ IP") {
+		t.Error("no Top IPs section expected when summaries is empty")
+	}
+}
+
+func TestScoreMarker_Buckets(t *testing.T) {
+	cases := []struct{ score int; want string }{
+		{0, "⚪"}, {39, "⚪"},
+		{40, "🟡"}, {69, "🟡"},
+		{70, "🔴"}, {100, "🔴"},
+	}
+	for _, c := range cases {
+		if got := scoreMarker(c.score); got != c.want {
+			t.Errorf("score %d: got %s, want %s", c.score, got, c.want)
+		}
+	}
+}
+
 func TestHTMLEscape_StripsDangerousChars(t *testing.T) {
 	out := htmlEscape("<script>&\"")
 	if strings.Contains(out, "<") || strings.Contains(out, "\"") {

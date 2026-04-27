@@ -30,6 +30,8 @@ curl -sSL https://raw.githubusercontent.com/kitay-sudo/goronin/main/install.sh |
 
 Через минуту в Telegram придёт сообщение «GORONIN запущен» с перечнем активных ловушек.
 
+> 📖 **Хочешь понять как именно работают уведомления, во сколько обходится AI и что приходит в Telegram?** → [HOW_IT_WORKS.md](HOW_IT_WORKS.md) — пояснительный документ для пользователей, на простом языке без терминов.
+
 ---
 
 ## Что делает агент
@@ -41,7 +43,8 @@ curl -sSL https://raw.githubusercontent.com/kitay-sudo/goronin/main/install.sh |
 | **Correlator** | Группирует события по IP в окне 30 минут. Считает 0–100 score: количество событий, разнообразие типов, file canary, плотность во времени, известные паттерны (`ssh→canary`, `http→db→canary`). |
 | **Firewall** | iptables-цепочка `GORONIN-BLOCK`, threshold-based блокировка с эскалацией (3 хита/5 мин → бан 1 ч, повтор → 24 ч). Persistent — переживает reboot. |
 | **AI** | Claude / GPT / Gemini пишет короткий разбор события и цепочки. Опционально. |
-| **Telegram** | Per-event alert + chain alert при score ≥ 50 + startup notification. |
+| **Aggregator** | Двухуровневое окно: 5 мин «срочное» + 1 час «фоновое». События с одного сервера копятся, отправляются одной сводкой по всем IP. AI вызывается только когда суммарная угроза ≥ 30. Файловые ловушки на запись/удаление идут мимо агрегатора — мгновенный alert. Подробнее в [HOW_IT_WORKS.md](HOW_IT_WORKS.md). |
+| **Telegram** | Один сводный alert за окно вместо потока. Фоновый дайджест раз в час без AI. Мгновенный alert на file canary write. |
 
 ---
 
@@ -103,6 +106,11 @@ auto_ban:
   threshold: 3               # хитов до бана
   window: 5m                 # окно подсчёта
   block_duration: 1h         # длительность первого бана (повтор → 24ч)
+
+alerting:
+  urgent_window: 5m          # окно «срочной» агрегации
+  background_window: 1h      # окно «фонового» дайджеста
+  interest_threshold: 30     # суммарный score ниже которого batch уходит в фон
 
 whitelist_ips:
   - 203.0.113.42             # твой IP
@@ -170,8 +178,9 @@ goronin/
 │   ├── cmd/goronin/        # entry + CLI subcommands
 │   ├── pkg/protocol/       # EventRequest и константы
 │   └── internal/
+│       ├── aggregator/     # 5-мин/1-час двухуровневое окно для батчинга алертов
 │       ├── ai/             # Anthropic / OpenAI / Gemini
-│       ├── alerter/        # роутинг events → AI → Telegram
+│       ├── alerter/        # sweep events → AI → Telegram
 │       ├── config/         # YAML config + validation
 │       ├── correlator/     # chain analysis + scoring
 │       ├── firewall/       # iptables + persistent blocks
@@ -195,7 +204,13 @@ goronin/
 
 ## Roadmap
 
-### v0.1.0 — текущий релиз
+### v0.2.0 — текущий релиз
+
+- [x] **Двухуровневая агрегация алертов.** 5-минутное «срочное» окно собирает события со всех IP, отправляет одну сводку. Низкоскоровые сводки уходят в часовой «фоновый» дайджест без AI. На скан в 30 коннектов теперь 1 alert + 1 AI-вызов вместо 30 + 30. Подробнее в [HOW_IT_WORKS.md](HOW_IT_WORKS.md).
+- [x] Файловая ловушка на write/remove — мгновенный alert (минуя агрегатор).
+- [x] AnalyzeBatch на стороне AI — один промпт на всю сводку, не на каждое событие.
+
+### v0.1.0
 
 - [x] Standalone-агент без бэкенда
 - [x] 3 AI-провайдера (Anthropic / OpenAI / Gemini)
@@ -207,7 +222,6 @@ goronin/
 
 ### Дальше
 
-- [ ] **Debounce + батчинг алертов.** Сейчас на каждый коннект к ловушке — отдельный AI-вызов и Telegram-сообщение; при сканировании в 30 коннектов получаем 30 запросов. План: окно 5 минут на ключ `(тип, IP)`, первое событие → сразу alert, последующие копятся → один summary в конце окна.
 - [ ] **Real SSH honeypot на `golang.org/x/crypto/ssh`.** Сейчас SSH-trap отдаёт баннер и закрывает коннект — мы не видим что пытался ввести бот. С crypto/ssh будем логировать пары `(username, password)` и публичные ключи.
 - [ ] **Поддержка nftables.** Для новых дистрибутивов (Fedora 40+, RHEL 9+, Debian 12+) где iptables помечен deprecated.
 - [ ] **e2e-проверка install.sh в CI.** Раз в неделю прогонять `curl ... | bash` в Docker — страховка чтобы установка не сломалась незаметно.
