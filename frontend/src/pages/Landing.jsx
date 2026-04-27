@@ -142,7 +142,7 @@ function Hero() {
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
               <span className="font-serif-jp text-zinc-500">浪人</span>
               <span className="h-3 w-px bg-zinc-700" />
-              Open-source honeypot guard · MIT
+              Honeypot + детект взлома + авто-бан IP · MIT
             </div>
           </div>
         </Reveal>
@@ -156,11 +156,36 @@ function Hero() {
           </h1>
         </Reveal>
 
-        <Reveal delay={0.1}>
-          <p className="mt-6 text-center text-base md:text-lg text-zinc-400 max-w-2xl mx-auto leading-relaxed">
-            Один Go-бинарь на ваш сервер. Ловушки на портах, мониторинг файлов, авто-бан в iptables,
-            алерты в Telegram с разбором от AI (Claude / GPT / Gemini — на ваш выбор). Без бэкенда. Без аккаунтов.
-            Полностью open-source.
+        <Reveal delay={0.08}>
+          <p className="mt-6 text-center text-lg md:text-xl text-zinc-200 max-w-2xl mx-auto leading-relaxed font-medium">
+            Расставляет ловушки на сервере, ловит сканеры и взломщиков в реальном времени,
+            мгновенно шлёт алерт в Telegram и сам банит атакующий IP в iptables.
+          </p>
+        </Reveal>
+
+        <Reveal delay={0.12}>
+          <div className="mt-5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-sm text-zinc-500">
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-1 h-1 rounded-full bg-emerald-400/70" />
+              Поддельные порты-приманки (SSH, HTTP, MySQL…)
+            </span>
+            <span className="text-zinc-700">·</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-1 h-1 rounded-full bg-emerald-400/70" />
+              Алерт в Telegram через секунды
+            </span>
+            <span className="text-zinc-700">·</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="w-1 h-1 rounded-full bg-emerald-400/70" />
+              Автоблокировка IP через iptables
+            </span>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.16}>
+          <p className="mt-5 text-center text-sm md:text-base text-zinc-400 max-w-2xl mx-auto leading-relaxed">
+            Один Go-бинарь на сервер. Опционально — AI-разбор атаки (Claude / GPT / Gemini, на ваш ключ).
+            Без бэкенда, без аккаунтов, полностью open-source.
           </p>
         </Reveal>
 
