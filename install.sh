@@ -82,9 +82,10 @@ header() {
 footer() {
   local elapsed=$((SECONDS - START_TS))
   printf "\n  %sinstalled in %ds%s\n\n" "$C_DIM" "$elapsed" "$C_RESET"
-  printf "  %snext:%s  goronin status     %s# проверить состояние%s\n" "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "  %snext:%s  goronin health     %s# проверка всех подсистем%s\n" "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "         goronin status     %s# статус сервиса%s\n" "$C_DIM" "$C_RESET"
   printf "         goronin logs -f    %s# смотреть логи%s\n" "$C_DIM" "$C_RESET"
-  printf "         sudo goronin reconfigure\n\n"
+  printf "         goronin --help     %s# все команды%s\n\n" "$C_DIM" "$C_RESET"
   printf "  %s─────────────────────────────────────────%s\n" "$C_DIM" "$C_RESET"
   printf "  %sauthor%s    kitay-sudo\n" "$C_DIM" "$C_RESET"
   printf "  %sgithub%s    github.com/kitay-sudo/goronin\n" "$C_DIM" "$C_RESET"

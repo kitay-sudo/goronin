@@ -6,6 +6,7 @@
 //   uninstall    — stop service, remove unit + binary + config + data
 //   daemon       — the actual long-running process (called by systemd, not the user)
 //   start/stop/restart/status/logs — systemd wrappers
+//   health       — quick green/red check across all subsystems
 //   unban <ip>   — remove an IP from the GORONIN-BLOCK chain
 //   reset        — flush iptables chain and clear persisted blocks
 //   version      — print build info
@@ -15,10 +16,14 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -66,6 +71,8 @@ func main() {
 	case "logs":
 		follow := len(os.Args) > 2 && (os.Args[2] == "-f" || os.Args[2] == "--follow")
 		_ = systemd.Logs(follow)
+	case "health":
+		runHealth()
 	case "unban":
 		runUnban()
 	case "reset":
@@ -93,6 +100,7 @@ func usage() {
   goronin restart              перезапустить сервис
   goronin status               статус сервиса
   goronin logs [-f]            показать логи (-f — следить)
+  goronin health               проверка состояния всех подсистем
   goronin unban <ip>           разблокировать IP вручную
   goronin reset                сбросить все баны и очистить iptables
   goronin version              версия
@@ -393,6 +401,309 @@ func labelOf(typ string) string {
 		return "db"
 	}
 	return typ
+}
+
+// ---------- health ----------
+
+// runHealth prints a green/red checklist across the things that can break:
+// systemd state, config, traps (last reported ports + currently listening),
+// canaries, iptables chain, telegram reachability, AI provider config,
+// recent error count. Best-effort — every check catches its own errors so
+// the report always finishes and shows what worked alongside what didn't.
+func runHealth() {
+	const (
+		cReset = "\x1b[0m"
+		cOK    = "\x1b[32m"
+		cWarn  = "\x1b[33m"
+		cErr   = "\x1b[31m"
+		cDim   = "\x1b[2m"
+		cBold  = "\x1b[1m"
+	)
+	useColor := isTerminal(os.Stdout)
+	color := func(c, s string) string {
+		if !useColor {
+			return s
+		}
+		return c + s + cReset
+	}
+
+	fmt.Printf("\n%s GORONIN health check%s\n\n", color(cBold, ""), color("", ""))
+
+	ok := func(label, value string) {
+		fmt.Printf("  %s %s         %s\n", color(cOK, "✓"), padRight(label, 12), value)
+	}
+	warn := func(label, value string) {
+		fmt.Printf("  %s %s         %s\n", color(cWarn, "⚠"), padRight(label, 12), value)
+	}
+	bad := func(label, value string) {
+		fmt.Printf("  %s %s         %s\n", color(cErr, "✗"), padRight(label, 12), value)
+	}
+
+	overallOK := true
+
+	// --- 1. Service state ---
+	if systemd.IsActive() {
+		ok("сервис", "active (running)")
+	} else {
+		bad("сервис", "не запущен — попробуй: sudo goronin start")
+		overallOK = false
+	}
+
+	// --- 2. Config ---
+	cfg, cfgErr := config.Load(config.DefaultPath)
+	if cfgErr != nil {
+		bad("конфиг", fmt.Sprintf("не загружается: %v", cfgErr))
+		fmt.Println()
+		fmt.Println(color(cDim, "  Без конфига дальнейшие проверки невозможны. Запусти: sudo goronin install"))
+		os.Exit(1)
+	}
+	ok("конфиг", config.DefaultPath)
+
+	// --- 3. Version ---
+	ok("версия", version)
+
+	// --- 4. Traps: last reported ports from journal + which are still listening ---
+	ports := readLastTrapPorts()
+	if len(ports) == 0 {
+		warn("ловушки", "не найдены в логах — сервис только что стартовал?")
+	} else {
+		fmt.Printf("  %s %s\n", color(cOK, "✓"), padRight("ловушки", 12))
+		for _, p := range ports {
+			alive := isPortListening(p.port)
+			marker := color(cOK, "✓")
+			tail := ""
+			if !alive {
+				marker = color(cErr, "✗")
+				tail = "  (порт не слушает!)"
+				overallOK = false
+			}
+			fmt.Printf("                  %s  %-5s %d%s\n", marker, p.kind, p.port, tail)
+		}
+	}
+
+	// --- 5. Canaries ---
+	if len(cfg.WatchFiles) == 0 {
+		warn("канарейки", "ни одного файла в watch_files")
+	} else {
+		alive, missing := 0, 0
+		for _, f := range cfg.WatchFiles {
+			if _, err := os.Stat(f); err == nil {
+				alive++
+			} else {
+				missing++
+			}
+		}
+		msg := fmt.Sprintf("%d файлов отслеживается", alive)
+		if missing > 0 {
+			msg += fmt.Sprintf(", %d отсутствует", missing)
+			warn("канарейки", msg)
+		} else {
+			ok("канарейки", msg)
+		}
+	}
+
+	// --- 6. Firewall: GORONIN-BLOCK chain + active blocks count ---
+	chainExists, blockCount := firewallStatus(cfg.DataDir)
+	switch {
+	case !chainExists:
+		warn("iptables", "цепочка GORONIN-BLOCK не найдена (auto_ban=off?)")
+	case blockCount == 0:
+		ok("iptables", "цепочка активна, активных банов нет")
+	default:
+		ok("iptables", fmt.Sprintf("цепочка активна, %d IP заблокировано", blockCount))
+	}
+
+	// --- 7. Telegram: getMe ---
+	tg := telegram.New(cfg.Telegram)
+	tgCtx, tgCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	botName, tgErr := tg.Verify(tgCtx)
+	tgCancel()
+	if tgErr != nil {
+		bad("telegram", fmt.Sprintf("getMe failed: %v", tgErr))
+		overallOK = false
+	} else {
+		ok("telegram", "@"+botName)
+	}
+
+	// --- 8. AI provider ---
+	switch strings.ToLower(cfg.AI.Provider) {
+	case "", "none", "off":
+		warn("AI", "отключён (анализ событий без рассуждений)")
+	default:
+		model := cfg.AI.Model
+		if model == "" {
+			model = "(дефолтная модель)"
+		}
+		if cfg.AI.APIKey == "" {
+			bad("AI", fmt.Sprintf("%s — API-ключ пуст", cfg.AI.Provider))
+			overallOK = false
+		} else {
+			ok("AI", fmt.Sprintf("%s · %s", cfg.AI.Provider, model))
+		}
+	}
+
+	// --- 9. Errors in last hour ---
+	errCount := countRecentErrors(time.Hour)
+	switch {
+	case errCount < 0:
+		warn("ошибки", "не удалось прочитать journal")
+	case errCount == 0:
+		ok("ошибки", "за последний час: 0")
+	case errCount < 5:
+		warn("ошибки", fmt.Sprintf("за последний час: %d (см. goronin logs)", errCount))
+	default:
+		bad("ошибки", fmt.Sprintf("за последний час: %d (см. goronin logs)", errCount))
+		overallOK = false
+	}
+
+	fmt.Println()
+	if overallOK {
+		fmt.Println(" ", color(cOK, "всё ок"))
+	} else {
+		fmt.Println(" ", color(cErr, "есть проблемы — см. строки с ✗ выше"))
+	}
+	fmt.Println()
+	if !overallOK {
+		os.Exit(1)
+	}
+}
+
+// trapPort is one row of "last reported trap listeners" parsed from journal.
+type trapPort struct {
+	kind string // ssh / http / ftp / db
+	port int
+}
+
+// readLastTrapPorts pulls the most recent "trap listening on port N" lines
+// from journalctl for the goronin unit. We only keep one entry per kind
+// (the latest), since restarts produce stale lines that would confuse the
+// reader. Returns empty slice on any failure — health() degrades gracefully.
+func readLastTrapPorts() []trapPort {
+	out, err := exec.Command("journalctl", "-u", systemd.ServiceName, "-o", "cat", "--no-pager", "-n", "200").CombinedOutput()
+	if err != nil {
+		return nil
+	}
+	re := regexp.MustCompile(`\[traps\]\s+(\w+)_trap\s+trap listening on port\s+(\d+)`)
+	latest := map[string]int{}
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		m := re.FindStringSubmatch(scanner.Text())
+		if m == nil {
+			continue
+		}
+		var p int
+		fmt.Sscanf(m[2], "%d", &p)
+		latest[m[1]] = p
+	}
+	order := []string{"ssh", "http", "ftp", "db"}
+	out2 := make([]trapPort, 0, 4)
+	for _, k := range order {
+		if p, ok := latest[k]; ok {
+			out2 = append(out2, trapPort{kind: k, port: p})
+		}
+	}
+	return out2
+}
+
+// isPortListening checks whether ANY process on the host has the port in
+// LISTEN state on tcp4 or tcp6. Uses `ss -ltn` (busybox-friendly) with
+// a fallback to `netstat -ltn` for old systems. Returns false on error —
+// the health check just won't tick the row green.
+func isPortListening(port int) bool {
+	tools := [][]string{
+		{"ss", "-ltn"},
+		{"netstat", "-ltn"},
+	}
+	needle := fmt.Sprintf(":%d ", port)
+	for _, t := range tools {
+		out, err := exec.Command(t[0], t[1:]...).CombinedOutput()
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(out), needle) {
+			return true
+		}
+		// Some kernels print "LISTEN" with no trailing space; check end-of-line too.
+		for _, line := range strings.Split(string(out), "\n") {
+			if strings.Contains(line, fmt.Sprintf(":%d", port)) && strings.Contains(strings.ToUpper(line), "LISTEN") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// firewallStatus reports whether the GORONIN-BLOCK chain exists in iptables
+// and how many blocks the storage layer has on record. Both checks are
+// independent — chain may exist with zero entries (clean state).
+func firewallStatus(dataDir string) (chainExists bool, blockCount int) {
+	if err := exec.Command("iptables", "-L", firewall.ChainName, "-n").Run(); err == nil {
+		chainExists = true
+	}
+	if dataDir == "" {
+		return chainExists, 0
+	}
+	store, err := storage.Open(dataDir + "/state.db")
+	if err != nil {
+		return chainExists, 0
+	}
+	defer store.Close()
+	blocks, err := store.ListBlocks()
+	if err != nil {
+		return chainExists, 0
+	}
+	now := time.Now()
+	for _, b := range blocks {
+		if b.ExpiresAt.After(now) {
+			blockCount++
+		}
+	}
+	return chainExists, blockCount
+}
+
+// countRecentErrors greps journal for "error"/"failed"/"panic" since `since`
+// ago. Returns -1 if journalctl isn't available or fails.
+func countRecentErrors(since time.Duration) int {
+	mins := int(since.Minutes())
+	if mins < 1 {
+		mins = 1
+	}
+	out, err := exec.Command(
+		"journalctl", "-u", systemd.ServiceName, "-o", "cat", "--no-pager",
+		"--since", fmt.Sprintf("%d min ago", mins),
+	).CombinedOutput()
+	if err != nil {
+		return -1
+	}
+	re := regexp.MustCompile(`(?i)\b(error|failed|panic)\b`)
+	count := 0
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		line := scanner.Text()
+		// Skip our own [traps] startup lines, which contain "trap" but no error.
+		if re.MatchString(line) {
+			count++
+		}
+	}
+	return count
+}
+
+// isTerminal returns true if the file is a TTY. Used to decide on color.
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+func padRight(s string, width int) string {
+	if len(s) >= width {
+		return s
+	}
+	return s + strings.Repeat(" ", width-len(s))
 }
 
 // ---------- unban / reset ----------

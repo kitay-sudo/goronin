@@ -65,17 +65,24 @@ curl -sSL https://raw.githubusercontent.com/kitay-sudo/goronin/main/install.sh |
 После установки доступны:
 
 ```bash
+goronin health              # проверка всех подсистем (сервис, ловушки, telegram, AI)
 goronin status              # systemctl status
-goronin logs -f             # journalctl -u goronin -f
-goronin restart             # перезапустить демон
-goronin stop / start
+goronin logs [-f]           # journalctl -u goronin (-f — follow)
+goronin start / stop / restart
+goronin reconfigure         # перезапустить wizard, сохранить новый конфиг, рестарт
 goronin unban 1.2.3.4       # снять бан вручную
 goronin reset               # сбросить ВСЕ баны и очистить iptables
-goronin reconfigure         # перезапустить wizard, сохранить новый конфиг, рестарт
+goronin uninstall           # полное удаление (сервис, бинарь, конфиг, данные)
 goronin version
+goronin --help              # этот список
 ```
 
 Все команды требуют root (используют systemctl и iptables).
+
+`goronin health` — самая полезная: одна команда показывает, что сервис активен,
+какие порты заняты ловушками, доступен ли Telegram-бот, настроен ли AI и
+сколько ошибок было за последний час. Запускай при сомнениях вместо ручного
+просмотра `journalctl`.
 
 ---
 
