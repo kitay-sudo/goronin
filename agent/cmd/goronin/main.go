@@ -485,7 +485,7 @@ func runHealth() {
 				tail = "  (порт не слушает!)"
 				overallOK = false
 			}
-			fmt.Printf("                %s  %-5s %d%s\n", marker, p.kind, p.port, tail)
+			fmt.Printf("                 %s  %-5s %d%s\n", marker, p.kind, p.port, tail)
 		}
 	}
 
