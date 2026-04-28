@@ -7,6 +7,7 @@ dist/
 coverage/
 docs/
 promo/
+frontend/
 
 # --- Go agent ---
 # собранные бинари не коммитим — релизит CI

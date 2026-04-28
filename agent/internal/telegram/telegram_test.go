@@ -268,6 +268,32 @@ func TestFormatAgentStartup_Compact(t *testing.T) {
 	}
 }
 
+func TestFormatHeartbeat_HasUptimeAndCounters(t *testing.T) {
+	out := FormatHeartbeat("prod-1", 12*time.Hour+12*time.Minute, 287, 0)
+	for _, want := range []string{"GORONIN жив", "prod-1", "12h 12m", "Тиков: 287", "Алертов: 0"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestHumanUptime_PicksCoarsestUnit(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{45 * time.Second, "45s"},
+		{5*time.Minute + 10*time.Second, "5m 10s"},
+		{12*time.Hour + 12*time.Minute, "12h 12m"},
+		{3*24*time.Hour + 2*time.Hour, "3d 2h"},
+	}
+	for _, c := range cases {
+		if got := humanUptime(c.d); got != c.want {
+			t.Errorf("humanUptime(%v) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}
+
 func TestHTMLEscape_StripsDangerousChars(t *testing.T) {
 	out := htmlEscape("<script>&\"")
 	if strings.Contains(out, "<") || strings.Contains(out, "\"") {

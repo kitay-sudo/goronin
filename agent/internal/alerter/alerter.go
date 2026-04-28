@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/kitay-sudo/goronin/agent/internal/aggregator"
@@ -53,6 +54,16 @@ type Alerter struct {
 	provider   ai.Provider
 	tg         *telegram.Client
 	fw         FirewallStatus // optional — nil means "don't annotate blocks"
+
+	// ticks counts every event observed by the daemon (trap or canary),
+	// regardless of whether it ends up in an alert. Used by the heartbeat
+	// service as a "system is seeing traffic" pulse. Monotonic since start.
+	ticks atomic.Int64
+
+	// alertsSinceHeartbeat counts successful alert-channel Telegram sends
+	// (per-event, batch, digest, instant). Reset by the heartbeat service
+	// after each tick so the heartbeat reports "alerts since last beat".
+	alertsSinceHeartbeat atomic.Int64
 }
 
 // New constructs an alerter with the three required dependencies.
@@ -69,6 +80,35 @@ func New(serverName string, provider ai.Provider, tg *telegram.Client) *Alerter 
 func (a *Alerter) WithFirewall(fw FirewallStatus) *Alerter {
 	a.fw = fw
 	return a
+}
+
+// ObserveTick is called by the daemon for every trap/canary event so the
+// heartbeat can report "the system saw N events since last beat". Counts
+// are incremented before any filtering or AI/Telegram work, so they
+// reflect what the daemon actually observed, not what it ended up sending.
+func (a *Alerter) ObserveTick() { a.ticks.Add(1) }
+
+// Ticks returns the running event-observed counter. Monotonic from start.
+func (a *Alerter) Ticks() int64 { return a.ticks.Load() }
+
+// AlertsSinceHeartbeatReset reads the alert counter and atomically zeroes
+// it. Called by the heartbeat service immediately before formatting the
+// "still alive" message so each heartbeat reports the count for its own
+// window.
+func (a *Alerter) AlertsSinceHeartbeatReset() int64 {
+	return a.alertsSinceHeartbeat.Swap(0)
+}
+
+// sendAlert wraps tg.Send for paths that should bump the alert counter
+// (per-event, batch, digest, instant). Startup and heartbeat sends bypass
+// this and call tg.Send directly so they don't pollute the operator's
+// "alerts since last beat" number.
+func (a *Alerter) sendAlert(ctx context.Context, msg string) error {
+	if err := a.tg.Send(ctx, msg); err != nil {
+		return err
+	}
+	a.alertsSinceHeartbeat.Add(1)
+	return nil
 }
 
 // FlushBatch is the aggregator.FlushFunc. Routes urgent vs background to
@@ -98,7 +138,7 @@ func (a *Alerter) HandleInstant(ev protocol.EventRequest) {
 	}
 
 	msg := telegram.FormatEventAlert(a.serverName, ev, analysis)
-	if err := a.tg.Send(context.Background(), msg); err != nil {
+	if err := a.sendAlert(context.Background(), msg); err != nil {
 		log.Printf("[alerter] instant telegram send failed: %v", err)
 	}
 }
@@ -143,7 +183,7 @@ func (a *Alerter) sendUrgentBatch(b aggregator.Batch) {
 	}
 
 	msg := telegram.FormatBatchAlert(a.serverName, b.TotalScore, b.EventCount, windowMin, summaries, analysis)
-	if err := a.tg.Send(context.Background(), msg); err != nil {
+	if err := a.sendAlert(context.Background(), msg); err != nil {
 		log.Printf("[alerter] urgent batch telegram send failed: %v", err)
 	}
 }
@@ -154,7 +194,7 @@ func (a *Alerter) sendBackgroundDigest(b aggregator.Batch) {
 	windowMin := minutesBetween(b.StartedAt, b.ClosedAt)
 
 	msg := telegram.FormatBackgroundDigest(a.serverName, b.EventCount, windowMin, summaries)
-	if err := a.tg.Send(context.Background(), msg); err != nil {
+	if err := a.sendAlert(context.Background(), msg); err != nil {
 		log.Printf("[alerter] background digest telegram send failed: %v", err)
 	}
 }

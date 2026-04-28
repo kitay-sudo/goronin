@@ -510,6 +510,48 @@ func FormatAgentStartup(serverName, version string, traps, canaries, canariesFai
 	return b.String()
 }
 
+// FormatHeartbeat is the periodic "still alive" message sent every
+// watch.heartbeat_hours. Tree-style like the rest, no severity bar — this
+// channel exists to confirm the agent is up, not to flag attacks.
+//
+// Layout:
+//
+//	🌿 GORONIN жив — server
+//	├ Uptime watch: 12h 12m
+//	├ Тиков: 287 · Алертов: 0
+//	└ Время: 28.04.2026 20:07:02 MSK
+func FormatHeartbeat(serverName string, uptime time.Duration, ticks, alertsSinceLast int64) string {
+	t := time.Now().In(mustTZ()).Format("02.01.2006 15:04:05 MST")
+	var b strings.Builder
+	fmt.Fprintf(&b, "<b>🌿 GORONIN жив — %s</b>\n", htmlEscape(serverName))
+	fmt.Fprintf(&b, "├ Uptime watch: %s\n", htmlEscape(humanUptime(uptime)))
+	fmt.Fprintf(&b, "├ Тиков: %d · Алертов: %d\n", ticks, alertsSinceLast)
+	fmt.Fprintf(&b, "└ Время: %s", t)
+	return b.String()
+}
+
+// humanUptime renders a duration as "3d 2h" / "12h 12m" / "5m 10s" / "45s".
+// Coarser units win — once you're past a day, minutes are noise.
+func humanUptime(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	days := int(d / (24 * time.Hour))
+	hours := int((d % (24 * time.Hour)) / time.Hour)
+	mins := int((d % time.Hour) / time.Minute)
+	secs := int((d % time.Minute) / time.Second)
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh", days, hours)
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm", hours, mins)
+	case mins > 0:
+		return fmt.Sprintf("%dm %ds", mins, secs)
+	default:
+		return fmt.Sprintf("%ds", secs)
+	}
+}
+
 // htmlEscape escapes the four chars Telegram's HTML parser cares about.
 func htmlEscape(s string) string {
 	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")

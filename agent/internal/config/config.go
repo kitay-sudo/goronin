@@ -59,6 +59,17 @@ type AutoBanConfig struct {
 	BlockDuration time.Duration `yaml:"block_duration"`
 }
 
+// WatchConfig contains live-monitoring knobs that affect what the daemon
+// tells the operator about itself (as opposed to about attackers).
+type WatchConfig struct {
+	// HeartbeatHours: how often to send a "still alive" message to Telegram.
+	// 0 disables; default 12 (twice a day). Pointer so YAML can distinguish
+	// "absent" (→ backfilled to 12) from "explicitly 0" (→ disabled). Old
+	// installs without the key get the default automatically — no manual
+	// YAML edits needed after a binary upgrade.
+	HeartbeatHours *int `yaml:"heartbeat_hours"`
+}
+
 // AlertingConfig controls how events are batched into Telegram messages
 // to keep noise and LLM token spend bounded. See HOW_IT_WORKS.md for the
 // full model. Zero values fall back to the defaults below.
@@ -85,6 +96,7 @@ type Config struct {
 	Traps        TrapsConfig    `yaml:"traps"`
 	AutoBan      AutoBanConfig  `yaml:"auto_ban"`
 	Alerting     AlertingConfig `yaml:"alerting"`
+	Watch        WatchConfig    `yaml:"watch"`
 	WhitelistIPs []string       `yaml:"whitelist_ips"`
 	WatchFiles   []string       `yaml:"watch_files"`
 	DataDir      string         `yaml:"data_dir"` // default /var/lib/goronin
@@ -123,6 +135,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Alerting.InterestThreshold == 0 {
 		c.Alerting.InterestThreshold = 30
+	}
+	// HeartbeatHours: default 12 (twice a day). nil = absent in YAML →
+	// backfill; explicit 0 = user disabled, leave alone.
+	if c.Watch.HeartbeatHours == nil {
+		twelve := 12
+		c.Watch.HeartbeatHours = &twelve
 	}
 }
 

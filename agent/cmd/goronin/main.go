@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -33,6 +34,7 @@ import (
 	"github.com/kitay-sudo/goronin/agent/internal/alerter"
 	"github.com/kitay-sudo/goronin/agent/internal/config"
 	"github.com/kitay-sudo/goronin/agent/internal/firewall"
+	"github.com/kitay-sudo/goronin/agent/internal/heartbeat"
 	"github.com/kitay-sudo/goronin/agent/internal/storage"
 	"github.com/kitay-sudo/goronin/agent/internal/systemd"
 	"github.com/kitay-sudo/goronin/agent/internal/telegram"
@@ -77,6 +79,8 @@ func main() {
 		runUnban()
 	case "reset":
 		runReset()
+	case "config":
+		runConfig()
 	case "version", "-v", "--version":
 		fmt.Println("goronin", version)
 	case "help", "-h", "--help":
@@ -103,7 +107,11 @@ func usage() {
   goronin health               проверка состояния всех подсистем
   goronin unban <ip>           разблокировать IP вручную
   goronin reset                сбросить все баны и очистить iptables
+  goronin config set <k> <v>   изменить отдельную настройку (см. ключи ниже)
   goronin version              версия
+
+Ключи для config set:
+  watch.heartbeat_hours        интервал heartbeat-сообщения, часы; 0 — выключить
 
   goronin daemon               запуск демона (вызывается systemd, не вручную)
 `)
@@ -250,6 +258,7 @@ func runUninstall() {
 func runDaemon() {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
 	log.Printf("[goronin] starting daemon, version=%s", version)
+	daemonStart := time.Now()
 
 	cfg, err := config.Load(config.DefaultPath)
 	if err != nil {
@@ -307,6 +316,7 @@ func runDaemon() {
 	//   - file-canary write/remove → al.HandleInstant (bypass aggregator)
 	//   - everything else          → agg.Observe (5-min batching)
 	onEvent := func(ev protocol.EventRequest) {
+		al.ObserveTick()
 		if ev.Details == nil {
 			ev.Details = map[string]string{}
 		}
@@ -366,6 +376,12 @@ func runDaemon() {
 		descs = append(descs, fmt.Sprintf("%s:%d", labelOf(t.Type), t.Port))
 	}
 	al.SendStartup(version, descs, canaries, canaryFailed)
+
+	// Heartbeat: periodic "still alive" message. Disabled if heartbeat_hours
+	// is 0 (Start returns nil and Stop is a no-op on nil).
+	hbInterval := time.Duration(*cfg.Watch.HeartbeatHours) * time.Hour
+	hb := heartbeat.Start(cfg.ServerName, hbInterval, daemonStart, al, tg)
+	defer hb.Stop()
 
 	log.Println("[goronin] daemon ready")
 
@@ -855,6 +871,66 @@ func runReset() {
 		fail("reset:", err)
 	}
 	fmt.Println("✓ iptables-цепочка очищена, активные баны удалены")
+}
+
+// ---------- config ----------
+
+// runConfig dispatches the "config" subcommand. Currently only `set <key>
+// <value>` is wired — `get` and `unset` can be added when there's a second
+// caller. Lives here rather than as its own package because the surface
+// area is tiny and we'd otherwise duplicate the load/save plumbing.
+func runConfig() {
+	if len(os.Args) < 3 {
+		fail("usage:", fmt.Errorf("goronin config set <key> <value>"))
+	}
+	switch os.Args[2] {
+	case "set":
+		runConfigSet()
+	default:
+		fail("config:", fmt.Errorf("unknown subcommand %q (expected: set)", os.Args[2]))
+	}
+}
+
+// runConfigSet writes a single key in /etc/goronin/config.yml and restarts
+// the service if it's running. Persists through Save → applyDefaults so
+// any other backfilled fields (defaults added in newer versions) get
+// written back at the same time, no manual YAML editing required.
+func runConfigSet() {
+	mustRoot()
+	if len(os.Args) < 5 {
+		fail("usage:", fmt.Errorf("goronin config set <key> <value>"))
+	}
+	key, value := os.Args[3], os.Args[4]
+
+	cfg, err := config.Load(config.DefaultPath)
+	if err != nil {
+		fail("load config:", err)
+	}
+
+	switch key {
+	case "watch.heartbeat_hours":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 0 {
+			fail("config set:", fmt.Errorf("watch.heartbeat_hours expects a non-negative integer, got %q", value))
+		}
+		cfg.Watch.HeartbeatHours = &n
+	default:
+		fail("config set:", fmt.Errorf("unknown key %q (try: watch.heartbeat_hours)", key))
+	}
+
+	if err := config.Save(config.DefaultPath, cfg); err != nil {
+		fail("save config:", err)
+	}
+	fmt.Printf("✓ %s = %s\n", key, value)
+
+	// Restart only if the service is currently up — `config set` should be
+	// safe to call before `goronin start` (e.g. during automated install).
+	if systemd.IsActive() {
+		fmt.Println("Перезапускаю сервис…")
+		if err := systemd.Restart(); err != nil {
+			fail("restart:", err)
+		}
+	}
 }
 
 // ---------- helpers ----------

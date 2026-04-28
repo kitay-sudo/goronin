@@ -144,4 +144,19 @@ func TestApplyDefaults_FillsBlanks(t *testing.T) {
 	if cfg.ServerName == "" {
 		t.Error("server_name should fall back to hostname")
 	}
+	if cfg.Watch.HeartbeatHours == nil || *cfg.Watch.HeartbeatHours != 12 {
+		t.Errorf("watch.heartbeat_hours default: %v", cfg.Watch.HeartbeatHours)
+	}
+}
+
+func TestApplyDefaults_PreservesExplicitHeartbeatZero(t *testing.T) {
+	zero := 0
+	cfg := &Config{
+		Telegram: TelegramConfig{BotToken: "t", ChatID: "c"},
+		Watch:    WatchConfig{HeartbeatHours: &zero},
+	}
+	cfg.applyDefaults()
+	if cfg.Watch.HeartbeatHours == nil || *cfg.Watch.HeartbeatHours != 0 {
+		t.Errorf("explicit 0 should not be overwritten, got %v", cfg.Watch.HeartbeatHours)
+	}
 }
