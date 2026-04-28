@@ -267,11 +267,37 @@ func scoreMarker(score int) string {
 }
 
 // FormatAgentStartup is sent when goronin starts. Confirms to the operator
-// that traps are listening.
-func FormatAgentStartup(serverName string, traps []string) string {
+// that traps are listening, prints the running version (so it's obvious that
+// an update actually rolled), and lists the file canaries created at boot.
+func FormatAgentStartup(serverName, version string, traps, canaries []string) string {
 	t := time.Now().In(mustTZ()).Format("02.01.2006 15:04:05 MST")
-	return fmt.Sprintf("✅ <b>GORONIN запущен — %s</b>\n\nЛовушки: %s\nВремя: %s",
-		htmlEscape(serverName), htmlEscape(strings.Join(traps, ", ")), t)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "🪴 <b>GORONIN запущен — %s</b>\n", htmlEscape(serverName))
+	fmt.Fprintf(&b, "Версия: <code>%s</code>\n\n", htmlEscape(version))
+	fmt.Fprintf(&b, "Ловушки: %s\n", htmlEscape(strings.Join(traps, ", ")))
+
+	// Canaries can be a long list, and the exact paths matter (the operator
+	// needs to know which files NOT to touch). Show all of them but cap at
+	// 10 to keep the message readable; the rest are summarised as "+N".
+	if n := len(canaries); n > 0 {
+		shown := canaries
+		extra := 0
+		if n > 10 {
+			shown = canaries[:10]
+			extra = n - 10
+		}
+		fmt.Fprintf(&b, "Канарейки (%d): %s", n, htmlEscape(strings.Join(shown, ", ")))
+		if extra > 0 {
+			fmt.Fprintf(&b, " +%d", extra)
+		}
+		b.WriteString("\n")
+	} else {
+		b.WriteString("Канарейки: не созданы (нет прав на запись или файлы уже существуют)\n")
+	}
+
+	fmt.Fprintf(&b, "Время: %s", t)
+	return b.String()
 }
 
 // htmlEscape escapes the four chars Telegram's HTML parser cares about.
