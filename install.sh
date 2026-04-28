@@ -42,16 +42,54 @@ done
 
 # ---------- coloring ----------
 if [[ -t 1 ]]; then
-  C_OK=$'\e[32m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_DIM=$'\e[2m'; C_RESET=$'\e[0m'
+  C_OK=$'\e[32m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_DIM=$'\e[2m'
+  C_BOLD=$'\e[1m'; C_CYAN=$'\e[36m'; C_RESET=$'\e[0m'
 else
-  C_OK=""; C_WARN=""; C_ERR=""; C_DIM=""; C_RESET=""
+  C_OK=""; C_WARN=""; C_ERR=""; C_DIM=""; C_BOLD=""; C_CYAN=""; C_RESET=""
 fi
 
+# ---------- structured output (compact + timings) ----------
+START_TS=$SECONDS
+
+# mm:ss since script start
+_ts() {
+  local elapsed=$((SECONDS - START_TS))
+  printf "%02d:%02d" $((elapsed / 60)) $((elapsed % 60))
+}
+
 say()  { printf "%s\n" "$*"; }
-ok()   { printf "%s✓%s %s\n" "$C_OK" "$C_RESET" "$*"; }
-warn() { printf "%s⚠%s %s\n" "$C_WARN" "$C_RESET" "$*" >&2; }
-err()  { printf "%s✗%s %s\n" "$C_ERR" "$C_RESET" "$*" >&2; }
+
+# step → in-progress action (arrow)
+step() { printf "  %s%s%s  %s→%s  %s\n" "$C_DIM" "$(_ts)" "$C_RESET" "$C_CYAN" "$C_RESET" "$*"; }
+
+# ok → completed action (check)
+ok()   { printf "  %s%s%s  %s✓%s  %s\n" "$C_DIM" "$(_ts)" "$C_RESET" "$C_OK" "$C_RESET" "$*"; }
+
+# info → neutral note (i)
+info() { printf "  %s%s%s  %sⓘ%s  %s\n" "$C_DIM" "$(_ts)" "$C_RESET" "$C_DIM" "$C_RESET" "$*"; }
+
+warn() { printf "  %s%s%s  %s⚠%s  %s\n" "$C_DIM" "$(_ts)" "$C_RESET" "$C_WARN" "$C_RESET" "$*" >&2; }
+err()  { printf "  %s%s%s  %s✗%s  %s\n" "$C_DIM" "$(_ts)" "$C_RESET" "$C_ERR" "$C_RESET" "$*" >&2; }
 die()  { err "$*"; exit 1; }
+
+# header / footer
+header() {
+  local version="$1" arch="$2"
+  printf "\n%s▶ goronin installer%s · %s%s%s · %slinux-%s%s\n\n" \
+    "$C_BOLD" "$C_RESET" "$C_CYAN" "$version" "$C_RESET" "$C_CYAN" "$arch" "$C_RESET"
+}
+
+footer() {
+  local elapsed=$((SECONDS - START_TS))
+  printf "\n  %sinstalled in %ds%s\n\n" "$C_DIM" "$elapsed" "$C_RESET"
+  printf "  %snext:%s  goronin status     %s# проверить состояние%s\n" "$C_BOLD" "$C_RESET" "$C_DIM" "$C_RESET"
+  printf "         goronin logs -f    %s# смотреть логи%s\n" "$C_DIM" "$C_RESET"
+  printf "         sudo goronin reconfigure\n\n"
+  printf "  %s─────────────────────────────────────────%s\n" "$C_DIM" "$C_RESET"
+  printf "  %sauthor%s    kitay-sudo\n" "$C_DIM" "$C_RESET"
+  printf "  %sgithub%s    github.com/kitay-sudo/goronin\n" "$C_DIM" "$C_RESET"
+  printf "  %stelegram%s  t.me/kitay9\n\n" "$C_DIM" "$C_RESET"
+}
 
 # ---------- preflight ----------
 [[ "$EUID" -eq 0 ]] || die "Запусти от root: curl ... | sudo bash"
@@ -77,12 +115,18 @@ fi
 
 # ---------- uninstall path (no download needed) ----------
 if [[ "$MODE" == "uninstall" ]]; then
+  printf "\n%s▶ goronin uninstaller%s\n\n" "$C_BOLD" "$C_RESET"
   if [[ -x "$INSTALL_DIR/$BIN_NAME" ]]; then
-    say "${C_DIM}Удаляю GORONIN…${C_RESET}"
+    step "удаление GORONIN"
     "$INSTALL_DIR/$BIN_NAME" uninstall
+    ok "удалено"
   else
-    warn "Бинарь $INSTALL_DIR/$BIN_NAME не найден — нечего удалять."
+    warn "бинарь $INSTALL_DIR/$BIN_NAME не найден — нечего удалять"
   fi
+  printf "\n  %s─────────────────────────────────────────%s\n" "$C_DIM" "$C_RESET"
+  printf "  %sauthor%s    kitay-sudo\n" "$C_DIM" "$C_RESET"
+  printf "  %sgithub%s    github.com/kitay-sudo/goronin\n" "$C_DIM" "$C_RESET"
+  printf "  %stelegram%s  t.me/kitay9\n\n" "$C_DIM" "$C_RESET"
   exit 0
 fi
 
@@ -92,26 +136,30 @@ EXISTING_CONFIG=""
 [[ -x "$INSTALL_DIR/$BIN_NAME" ]] && EXISTING_BIN="yes"
 [[ -f "$CONFIG_PATH" ]] && EXISTING_CONFIG="yes"
 
+# ---------- version selection ----------
+VERSION="${GORONIN_VERSION:-}"
+if [[ -z "$VERSION" ]]; then
+  # Print a temporary header before we know the version, then re-emit on confirm.
+  printf "\n%s▶ goronin installer%s · %slinux-%s%s\n\n" "$C_BOLD" "$C_RESET" "$C_CYAN" "$ARCH" "$C_RESET"
+  step "определение последней версии"
+  VERSION="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
+    | grep -oE '"tag_name":\s*"[^"]+"' | head -n1 | cut -d'"' -f4 || true)"
+  if [[ -z "$VERSION" ]]; then
+    warn "не удалось определить последний релиз — fallback на main"
+    VERSION="main"
+  fi
+  ok "версия: $VERSION"
+else
+  header "$VERSION" "$ARCH"
+  ok "версия (закреплена): $VERSION"
+fi
+
 if [[ "$MODE" == "reinstall" && -n "$EXISTING_BIN" ]]; then
-  warn "Режим --reinstall: сношу текущую установку (конфиг и данные будут утеряны)."
+  warn "режим --reinstall: сношу текущую установку (конфиг и данные будут утеряны)"
   "$INSTALL_DIR/$BIN_NAME" uninstall || true
   EXISTING_BIN=""
   EXISTING_CONFIG=""
 fi
-
-# ---------- version selection ----------
-VERSION="${GORONIN_VERSION:-}"
-if [[ -z "$VERSION" ]]; then
-  say "${C_DIM}Определяю последнюю версию…${C_RESET}"
-  VERSION="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
-    | grep -oE '"tag_name":\s*"[^"]+"' | head -n1 | cut -d'"' -f4 || true)"
-  if [[ -z "$VERSION" ]]; then
-    warn "Не удалось определить последний релиз — пробую main-ветку через git clone"
-    VERSION="main"
-  fi
-fi
-ok "Версия: $VERSION"
-ok "Архитектура: linux-$ARCH"
 
 # ---------- download ----------
 TMP="$(mktemp -d)"
@@ -119,56 +167,54 @@ trap 'rm -rf "$TMP"' EXIT
 
 BIN_URL="https://github.com/$REPO/releases/download/$VERSION/${BIN_NAME}-linux-${ARCH}"
 
-say "${C_DIM}Скачиваю $BIN_URL${C_RESET}"
+step "загрузка ${BIN_NAME}-linux-${ARCH}"
 if ! curl -fsSL "$BIN_URL" -o "$TMP/$BIN_NAME"; then
-  die "Не удалось скачать бинарь. Проверь, что релиз $VERSION существует на https://github.com/$REPO/releases"
+  die "не удалось скачать бинарь. проверь, что релиз $VERSION существует на https://github.com/$REPO/releases"
 fi
+ok "скачано"
 
 chmod +x "$TMP/$BIN_NAME"
 
 # Sanity check
 if ! "$TMP/$BIN_NAME" version >/dev/null 2>&1; then
-  die "Скачанный бинарь не запускается"
+  die "скачанный бинарь не запускается"
 fi
 
 # ---------- install binary (always — both fresh install and update) ----------
 # `install -m 0755` is atomic on the same filesystem (rename), so even if
 # the running daemon has the old inode open, swapping it is safe — the
 # kernel keeps the old binary alive until restart.
+step "установка бинаря"
 install -m 0755 "$TMP/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
-ok "Бинарь: $INSTALL_DIR/$BIN_NAME ($($INSTALL_DIR/$BIN_NAME version))"
+ok "$INSTALL_DIR/$BIN_NAME ($($INSTALL_DIR/$BIN_NAME version))"
 
 # ---------- branch: update vs fresh install ----------
 if [[ -n "$EXISTING_CONFIG" ]]; then
   # Update path: keep the existing config, just bounce the service so the
   # new binary takes over. No wizard — user already configured this box.
-  say
-  say "${C_DIM}Обнаружен существующий конфиг ($CONFIG_PATH) — обновляю без перезапроса настроек.${C_RESET}"
+  info "конфиг найден ($CONFIG_PATH) — wizard пропущен"
   if systemctl list-unit-files goronin.service >/dev/null 2>&1; then
+    step "перезапуск сервиса"
     systemctl restart goronin.service
-    ok "Сервис перезапущен с новой версией"
+    ok "goronin.service active"
   else
-    warn "Unit-файл systemd не найден — запускаю install для регистрации сервиса."
+    warn "unit-файл systemd не найден — запускаю install для регистрации сервиса"
     "$INSTALL_DIR/$BIN_NAME" install
   fi
-  say
-  say "Управление: ${C_OK}goronin status | logs -f | restart${C_RESET}"
-  say "Изменить настройки: ${C_OK}sudo goronin reconfigure${C_RESET}"
-  say "Удалить полностью:  ${C_OK}sudo goronin uninstall${C_RESET}  (или ${C_OK}--uninstall${C_RESET} в этом скрипте)"
+  footer
   exit 0
 fi
 
 # Fresh install: run the wizard. It needs a real terminal — pipe from curl
 # is already at EOF, so we reattach stdin to /dev/tty. If there's no tty
 # (cron, CI, `ssh -T`), bail out cleanly and tell the user how to finish.
-say
-say "${C_DIM}Свежая установка — запускаю интерактивный мастер…${C_RESET}"
+info "свежая установка — запускаю интерактивный мастер"
 say
 if [[ -e /dev/tty ]]; then
   exec "$INSTALL_DIR/$BIN_NAME" install </dev/tty
 else
-  warn "Нет доступа к /dev/tty — мастер установки не сможет считать ввод."
-  say  "Бинарь уже на месте. Заверши настройку вручную:"
-  say  "    sudo $INSTALL_DIR/$BIN_NAME install"
+  warn "нет доступа к /dev/tty — мастер установки не сможет считать ввод"
+  say  "  Бинарь уже на месте. Заверши настройку вручную:"
+  say  "      sudo $INSTALL_DIR/$BIN_NAME install"
   exit 0
 fi

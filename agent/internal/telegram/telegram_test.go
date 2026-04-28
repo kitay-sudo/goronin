@@ -90,11 +90,28 @@ func TestFormatEventAlert_IncludesIPAndType(t *testing.T) {
 		CreatedAt: time.Now(),
 		Details:   map[string]string{protocol.DetailActionTaken: "blocked"},
 	}
-	out := FormatEventAlert("prod-1", ev, "анализ")
-	for _, want := range []string{"prod-1", "1.2.3.4", "22221", "SSH", "blocked", "анализ"} {
+	// Tree-style output: server name + tree rows + AI body parsed from
+	// "Severity: ... \n Что произошло: ... \n Команды: ..."
+	ai := "Severity: ВЫСОКАЯ\nЧто произошло: тест\nКоманды:\nps aux"
+	out := FormatEventAlert("prod-1", ev, ai)
+	for _, want := range []string{"prod-1", "1.2.3.4", "22221", "SSH", "blocked", "ВЫСОКАЯ", "Что произошло", "ps aux"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+func TestFormatEventAlert_FallbackSeverity_FileCanaryWriteIsCritical(t *testing.T) {
+	ev := protocol.EventRequest{
+		Type:      protocol.EventFileCanary,
+		SourceIP:  "localhost",
+		CreatedAt: time.Now(),
+		Details:   map[string]string{"file": "/root/passwords_backup.txt", "operation": "WRITE"},
+	}
+	// No AI analysis → must fall back to КРИТИЧЕСКАЯ for canary write.
+	out := FormatEventAlert("srv", ev, "")
+	if !strings.Contains(out, "КРИТИЧЕСКАЯ") {
+		t.Errorf("canary WRITE should fall back to КРИТИЧЕСКАЯ, got:\n%s", out)
 	}
 }
 
@@ -106,7 +123,9 @@ func TestFormatChainAlert_SortsByTimeAndCountsTypes(t *testing.T) {
 		{Type: protocol.EventFileCanary, SourceIP: "9.9.9.9", CreatedAt: now.Add(5 * time.Second), Details: map[string]string{"file": "/root/.env", protocol.DetailActionTaken: "blocked"}},
 	}
 	out := FormatChainAlert("srv", "9.9.9.9", 75, events, "")
-	for _, want := range []string{"75/100", "ВЫСОКАЯ", "9.9.9.9", "Timeline", "/root/.env", "🛡"} {
+	// Score-based fallback: 75 → ВЫСОКАЯ. Timeline section must include
+	// the file path and a [blocked] marker on the canary row.
+	for _, want := range []string{"75/100", "ВЫСОКАЯ", "9.9.9.9", "Timeline", "/root/.env", "[blocked]"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
@@ -133,18 +152,19 @@ func TestFormatBatchAlert_StructureAndAI(t *testing.T) {
 		{IP: "1.1.1.1", Score: 70, EventCount: 4, Types: []string{"SSH", "HTTP"}},
 		{IP: "2.2.2.2", Score: 30, EventCount: 1, Types: []string{"FTP"}},
 	}
-	out := FormatBatchAlert("prod-1", 80, 5, 5, summaries, "AI text")
+	// AI returns "Severity:" first line — header should pick that up.
+	ai := "Severity: КРИТИЧЕСКАЯ\nХарактер: целевая атака\nЧто делать: проверить ssh-ключи"
+	out := FormatBatchAlert("prod-1", 80, 5, 5, summaries, ai)
 	for _, want := range []string{
 		"prod-1",
 		"Окно: 5 мин",
-		"Событий: 5",
-		"IP: 2",
+		"5 с 2 IP",
 		"80/100",
 		"КРИТИЧЕСКАЯ",
 		"1.1.1.1",
 		"2.2.2.2",
 		"SSH/HTTP",
-		"AI text",
+		"Характер",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -155,14 +175,18 @@ func TestFormatBatchAlert_StructureAndAI(t *testing.T) {
 func TestFormatBatchAlert_NoAIWhenEmpty(t *testing.T) {
 	summaries := []IPSummary{{IP: "1.1.1.1", Score: 20, EventCount: 1, Types: []string{"SSH"}}}
 	out := FormatBatchAlert("srv", 20, 1, 5, summaries, "")
-	if strings.Contains(out, "AI разбор") {
-		t.Errorf("AI section should be omitted when analysis empty:\n%s", out)
+	// No AI body keywords should leak in when analysis is empty.
+	if strings.Contains(out, "Характер") || strings.Contains(out, "Что делать") {
+		t.Errorf("AI body should be omitted when analysis empty:\n%s", out)
 	}
 }
 
 func TestFormatBatchAlert_SeverityBuckets(t *testing.T) {
 	s := []IPSummary{{IP: "1.1.1.1", Score: 50, EventCount: 1, Types: []string{"SSH"}}}
-	cases := []struct{ score int; want string }{
+	cases := []struct {
+		score int
+		want  string
+	}{
 		{30, "СРЕДНЯЯ"}, {65, "ВЫСОКАЯ"}, {85, "КРИТИЧЕСКАЯ"},
 	}
 	for _, c := range cases {
@@ -192,7 +216,7 @@ func TestFormatBackgroundDigest_TopIPsLimited(t *testing.T) {
 		"7 IP",
 		"1.1.1.1",
 		"5.5.5.5",
-		"и ещё 2 IP", // 7 total, top 5 shown
+		"ещё 2 IP",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -210,16 +234,36 @@ func TestFormatBackgroundDigest_NoIPSection_WhenEmpty(t *testing.T) {
 	}
 }
 
-func TestScoreMarker_Buckets(t *testing.T) {
-	cases := []struct{ score int; want string }{
-		{0, "⚪"}, {39, "⚪"},
-		{40, "🟡"}, {69, "🟡"},
-		{70, "🔴"}, {100, "🔴"},
+func TestExtractSeverity(t *testing.T) {
+	cases := []struct {
+		in           string
+		wantSeverity string
+		wantBody     string
+	}{
+		{"Severity: КРИТИЧЕСКАЯ\nЧто произошло: x", "КРИТИЧЕСКАЯ", "Что произошло: x"},
+		{"Severity:ВЫСОКАЯ", "ВЫСОКАЯ", ""},
+		{"no severity here", "", "no severity here"},
+		{"", "", ""},
 	}
 	for _, c := range cases {
-		if got := scoreMarker(c.score); got != c.want {
-			t.Errorf("score %d: got %s, want %s", c.score, got, c.want)
+		gotSev, gotBody := extractSeverity(c.in)
+		if gotSev != c.wantSeverity || gotBody != c.wantBody {
+			t.Errorf("extractSeverity(%q) = (%q, %q), want (%q, %q)",
+				c.in, gotSev, gotBody, c.wantSeverity, c.wantBody)
 		}
+	}
+}
+
+func TestFormatAgentStartup_Compact(t *testing.T) {
+	out := FormatAgentStartup("srv", "v0.6.0", []string{"ssh:1", "http:2", "ftp:3", "db:4"}, []string{"/root/a"}, nil)
+	// Compact format: counts, not full port list — and no per-port enumeration.
+	for _, want := range []string{"GORONIN запущен", "srv", "v0.6.0", "Ловушки: 4", "Канарейки: 1"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "ssh:1") || strings.Contains(out, "44219") {
+		t.Errorf("startup should not list ports individually:\n%s", out)
 	}
 }
 

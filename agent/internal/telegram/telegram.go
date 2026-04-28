@@ -101,49 +101,199 @@ func (c *Client) Verify(ctx context.Context) (string, error) {
 }
 
 // ---------- formatters ----------
+//
+// All alert messages share a tree-style layout (├ entries + └ on the last
+// line of a section) and skip emoji decorations — they were noisy and
+// inconsistent across clients. The header carries the only colour signal:
+// a severity word parsed out of the AI response (КРИТИЧЕСКАЯ / ВЫСОКАЯ /
+// СРЕДНЯЯ / НИЗКАЯ). When AI is disabled, we fall back to a heuristic
+// (file_canary write/remove → КРИТИЧЕСКАЯ).
 
 var typeLabels = map[string]string{
-	protocol.EventSSHTrap:    "🔒 SSH ловушка",
-	protocol.EventHTTPTrap:   "🌐 HTTP ловушка",
-	protocol.EventFTPTrap:    "📁 FTP ловушка",
-	protocol.EventDBTrap:     "🗄 DB ловушка",
-	protocol.EventFileCanary: "📄 Файловая ловушка",
+	protocol.EventSSHTrap:    "SSH ловушка",
+	protocol.EventHTTPTrap:   "HTTP ловушка",
+	protocol.EventFTPTrap:    "FTP ловушка",
+	protocol.EventDBTrap:     "DB ловушка",
+	protocol.EventFileCanary: "Файловая ловушка",
 }
 
 var typeLabelsShort = map[string]string{
-	protocol.EventSSHTrap:    "SSH trap",
-	protocol.EventHTTPTrap:   "HTTP trap",
-	protocol.EventFTPTrap:    "FTP trap",
-	protocol.EventDBTrap:     "DB trap",
-	protocol.EventFileCanary: "File canary",
+	protocol.EventSSHTrap:    "SSH",
+	protocol.EventHTTPTrap:   "HTTP",
+	protocol.EventFTPTrap:    "FTP",
+	protocol.EventDBTrap:     "DB",
+	protocol.EventFileCanary: "FILE",
 }
 
-// FormatEventAlert builds the per-event message. aiAnalysis is optional.
+// severityHeader returns the title-bar string for a given severity word.
+// Coloured square is the one bit of visual signal we keep — Telegram's
+// inline emoji rendering is consistent for these four.
+func severityHeader(severity string) string {
+	switch strings.ToUpper(severity) {
+	case "КРИТИЧЕСКАЯ":
+		return "🟥 КРИТИЧЕСКАЯ"
+	case "ВЫСОКАЯ":
+		return "🟧 ВЫСОКАЯ"
+	case "СРЕДНЯЯ":
+		return "🟨 СРЕДНЯЯ"
+	case "НИЗКАЯ":
+		return "🟩 НИЗКАЯ"
+	default:
+		return "🟨 СРЕДНЯЯ"
+	}
+}
+
+// fallbackSeverity picks a sane severity when AI is disabled / failed.
+// Logic mirrors the eventSystemPrompt rules: file_canary write/remove is
+// always critical; read on canary is high; everything else medium.
+func fallbackSeverity(ev protocol.EventRequest) string {
+	if ev.Type == protocol.EventFileCanary {
+		op := strings.ToUpper(ev.Details["operation"])
+		if strings.Contains(op, "WRITE") || strings.Contains(op, "REMOVE") {
+			return "КРИТИЧЕСКАЯ"
+		}
+		return "ВЫСОКАЯ"
+	}
+	return "СРЕДНЯЯ"
+}
+
+// extractSeverity reads "Severity: X" from the first line of an AI
+// response and returns X (or "" if the line is missing). The rest of the
+// AI text is returned with that line stripped, so the body shown to the
+// user doesn't repeat the severity already in the header.
+func extractSeverity(ai string) (severity, body string) {
+	ai = strings.TrimSpace(ai)
+	if ai == "" {
+		return "", ""
+	}
+	lines := strings.SplitN(ai, "\n", 2)
+	first := strings.TrimSpace(lines[0])
+	const prefix = "Severity:"
+	if strings.HasPrefix(first, prefix) {
+		severity = strings.TrimSpace(strings.TrimPrefix(first, prefix))
+		if len(lines) > 1 {
+			body = strings.TrimSpace(lines[1])
+		}
+		return severity, body
+	}
+	return "", ai
+}
+
+// FormatEventAlert builds the per-event message in tree style.
+//
+// Layout:
+//   <severity-bar> server
+//   ├ Тип:  <label>
+//   ├ IP:   <ip>
+//   ├ Порт: <n>            (omitted if 0)
+//   ├ Время: <ts>
+//   └ Действие: <...>      (omitted if absent)
+//
+//   <AI body, parsed from "Что произошло / Что делать / Команды:">
 func FormatEventAlert(serverName string, ev protocol.EventRequest, aiAnalysis string) string {
 	label, ok := typeLabels[ev.Type]
 	if !ok {
 		label = ev.Type
 	}
 	t := ev.CreatedAt.In(mustTZ()).Format("02.01.2006 15:04:05 MST")
+	action, hasAction := ev.Details[protocol.DetailActionTaken]
+
+	severity, body := extractSeverity(aiAnalysis)
+	if severity == "" {
+		severity = fallbackSeverity(ev)
+	}
+
+	// Build the tree section. Lines list out as ├, then mark the final
+	// line as └ once we know which fields are present.
+	type row struct{ k, v string }
+	rows := []row{
+		{"Тип", label},
+		{"IP", "<code>" + htmlEscape(ev.SourceIP) + "</code>"},
+	}
+	if ev.TrapPort > 0 {
+		rows = append(rows, row{"Порт", fmt.Sprintf("%d", ev.TrapPort)})
+	}
+	if file, ok := ev.Details["file"]; ok {
+		rows = append(rows, row{"Файл", "<code>" + htmlEscape(file) + "</code>"})
+	}
+	if op, ok := ev.Details["operation"]; ok {
+		rows = append(rows, row{"Операция", htmlEscape(op)})
+	}
+	rows = append(rows, row{"Время", t})
+	if hasAction {
+		rows = append(rows, row{"Действие", htmlEscape(action)})
+	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "🚨 <b>HONEYPOT ALERT — %s</b>\n\n", htmlEscape(serverName))
-	fmt.Fprintf(&b, "⚠️ Событие: %s\n", label)
-	fmt.Fprintf(&b, "🌍 IP: <code>%s</code>\n", htmlEscape(ev.SourceIP))
-	if ev.TrapPort > 0 {
-		fmt.Fprintf(&b, "🎯 Порт ловушки: %d\n", ev.TrapPort)
+	fmt.Fprintf(&b, "<b>%s — %s</b>\n", severityHeader(severity), htmlEscape(serverName))
+	for i, r := range rows {
+		prefix := "├"
+		if i == len(rows)-1 {
+			prefix = "└"
+		}
+		fmt.Fprintf(&b, "%s %s: %s\n", prefix, r.k, r.v)
 	}
-	fmt.Fprintf(&b, "🕐 Время: %s\n", t)
-	if action, ok := ev.Details[protocol.DetailActionTaken]; ok {
-		fmt.Fprintf(&b, "🛡 Действие: %s\n", htmlEscape(action))
-	}
-	if aiAnalysis != "" {
-		fmt.Fprintf(&b, "\n🤖 <b>AI анализ:</b>\n%s\n", htmlEscape(aiAnalysis))
+	if body != "" {
+		b.WriteString("\n")
+		b.WriteString(formatAIBody(body))
 	}
 	return b.String()
 }
 
-// FormatChainAlert builds the attack-chain summary.
+// formatAIBody takes the AI response (with "Severity:" already stripped)
+// and renders it for Telegram. We expect the model to emit labelled lines
+// like "Что произошло: ..." plus a "Команды:" block followed by shell
+// one-liners — wrap the commands in <pre> so they render as a copyable
+// monospace block. Anything we don't recognise is escaped and shown as-is.
+func formatAIBody(body string) string {
+	lines := strings.Split(body, "\n")
+	var out strings.Builder
+	var inCommands bool
+	var cmds []string
+
+	flushCommands := func() {
+		if len(cmds) == 0 {
+			return
+		}
+		out.WriteString("<pre>")
+		out.WriteString(htmlEscape(strings.Join(cmds, "\n")))
+		out.WriteString("</pre>\n")
+		cmds = nil
+	}
+
+	for _, raw := range lines {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			if inCommands {
+				flushCommands()
+				inCommands = false
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "Команды:") {
+			flushCommands()
+			inCommands = true
+			continue
+		}
+		if inCommands {
+			cmds = append(cmds, line)
+			continue
+		}
+		// Bold the label part ("Что произошло:" / "Что делать:" / etc.)
+		if idx := strings.Index(line, ":"); idx > 0 && idx < 40 {
+			label := line[:idx]
+			rest := strings.TrimSpace(line[idx+1:])
+			fmt.Fprintf(&out, "<b>%s:</b> %s\n", htmlEscape(label), htmlEscape(rest))
+		} else {
+			out.WriteString(htmlEscape(line))
+			out.WriteString("\n")
+		}
+	}
+	flushCommands()
+	return out.String()
+}
+
+// FormatChainAlert builds the attack-chain summary in tree style.
 func FormatChainAlert(serverName, sourceIP string, score int, events []protocol.EventRequest, aiAnalysis string) string {
 	sorted := make([]protocol.EventRequest, len(events))
 	copy(sorted, events)
@@ -156,20 +306,26 @@ func FormatChainAlert(serverName, sourceIP string, score int, events []protocol.
 		uniqTypes[ev.Type] = struct{}{}
 	}
 
-	severity := "СРЕДНЯЯ"
-	switch {
-	case score >= 80:
-		severity = "КРИТИЧЕСКАЯ"
-	case score >= 60:
-		severity = "ВЫСОКАЯ"
+	severity, body := extractSeverity(aiAnalysis)
+	if severity == "" {
+		// Score-based fallback when AI is off / parse failed.
+		switch {
+		case score >= 80:
+			severity = "КРИТИЧЕСКАЯ"
+		case score >= 60:
+			severity = "ВЫСОКАЯ"
+		default:
+			severity = "СРЕДНЯЯ"
+		}
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "🚨 <b>ATTACK CHAIN — %s</b>\n", htmlEscape(serverName))
-	fmt.Fprintf(&b, "🎯 Оценка: <b>%d/100</b> — угроза: <b>%s</b>\n\n", score, severity)
-	fmt.Fprintf(&b, "🌍 IP: <code>%s</code>\n", htmlEscape(sourceIP))
-	fmt.Fprintf(&b, "📊 Событий: %d (%d типов) за %dс\n\n", len(sorted), len(uniqTypes), spanSec)
-	b.WriteString("<b>Timeline:</b>\n")
+	fmt.Fprintf(&b, "<b>%s — %s</b>\n", severityHeader(severity), htmlEscape(serverName))
+	fmt.Fprintf(&b, "├ Цепочка от: <code>%s</code>\n", htmlEscape(sourceIP))
+	fmt.Fprintf(&b, "├ Score: %d/100\n", score)
+	fmt.Fprintf(&b, "└ События: %d (%d типов) за %dс\n", len(sorted), len(uniqTypes), spanSec)
+
+	b.WriteString("\n<b>Timeline:</b>\n<pre>")
 	for _, ev := range sorted {
 		t := ev.CreatedAt.In(mustTZ()).Format("15:04:05")
 		label, ok := typeLabelsShort[ev.Type]
@@ -178,16 +334,19 @@ func FormatChainAlert(serverName, sourceIP string, score int, events []protocol.
 		}
 		extra := ""
 		if f, ok := ev.Details["file"]; ok {
-			extra = " (" + htmlEscape(f) + ")"
+			extra = " " + f
 		}
 		marker := ""
 		if ev.Details[protocol.DetailActionTaken] == "blocked" {
-			marker = " 🛡"
+			marker = " [blocked]"
 		}
-		fmt.Fprintf(&b, "  %s  %s%s%s\n", t, label, extra, marker)
+		fmt.Fprintf(&b, "%s  %-4s%s%s\n", t, label, htmlEscape(extra), marker)
 	}
-	if aiAnalysis != "" {
-		fmt.Fprintf(&b, "\n🤖 <b>AI анализ цепочки:</b>\n%s\n", htmlEscape(aiAnalysis))
+	b.WriteString("</pre>")
+
+	if body != "" {
+		b.WriteString("\n")
+		b.WriteString(formatAIBody(body))
 	}
 	return b.String()
 }
@@ -200,121 +359,92 @@ type IPSummary struct {
 	Types      []string // distinct trap types this IP hit, ordered by name
 }
 
-// FormatBatchAlert produces the urgent 5-minute sweep message: "за окно
-// было N событий с M IP, вот разбивка". aiAnalysis is optional — empty
-// means "no AI was called for this batch".
+// FormatBatchAlert produces the urgent 5-minute sweep message in tree style.
+// aiAnalysis is optional — empty means no AI was called for this batch.
 func FormatBatchAlert(serverName string, totalScore, eventCount int, windowMinutes int, summaries []IPSummary, aiAnalysis string) string {
-	severity := "СРЕДНЯЯ"
-	switch {
-	case totalScore >= 80:
-		severity = "КРИТИЧЕСКАЯ"
-	case totalScore >= 60:
-		severity = "ВЫСОКАЯ"
+	severity, body := extractSeverity(aiAnalysis)
+	if severity == "" {
+		switch {
+		case totalScore >= 80:
+			severity = "КРИТИЧЕСКАЯ"
+		case totalScore >= 60:
+			severity = "ВЫСОКАЯ"
+		default:
+			severity = "СРЕДНЯЯ"
+		}
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "🚨 <b>GORONIN — %s</b>\n", htmlEscape(serverName))
-	fmt.Fprintf(&b, "Окно: %d мин · Событий: %d · IP: %d\n", windowMinutes, eventCount, len(summaries))
-	fmt.Fprintf(&b, "Общая угроза: <b>%d/100</b> (%s)\n\n", totalScore, severity)
+	fmt.Fprintf(&b, "<b>%s — %s</b>\n", severityHeader(severity), htmlEscape(serverName))
+	fmt.Fprintf(&b, "├ Окно: %d мин\n", windowMinutes)
+	fmt.Fprintf(&b, "├ События: %d с %d IP\n", eventCount, len(summaries))
+	fmt.Fprintf(&b, "└ Общий score: %d/100\n", totalScore)
 
-	for _, s := range summaries {
-		marker := scoreMarker(s.Score)
-		fmt.Fprintf(&b, "%s <code>%s</code> — score %d — %s×%d\n",
-			marker, htmlEscape(s.IP), s.Score, htmlEscape(strings.Join(s.Types, "/")), s.EventCount)
+	if len(summaries) > 0 {
+		b.WriteString("\n<b>IP:</b>\n<pre>")
+		for _, s := range summaries {
+			fmt.Fprintf(&b, "%-15s  score %3d  %s×%d\n",
+				htmlEscape(s.IP), s.Score, htmlEscape(strings.Join(s.Types, "/")), s.EventCount)
+		}
+		b.WriteString("</pre>")
 	}
 
-	if aiAnalysis != "" {
-		fmt.Fprintf(&b, "\n🤖 <b>AI разбор:</b>\n%s\n", htmlEscape(aiAnalysis))
+	if body != "" {
+		b.WriteString("\n")
+		b.WriteString(formatAIBody(body))
 	}
 	return b.String()
 }
 
-// FormatBackgroundDigest is the low-noise hourly summary: small numbers,
-// no AI, just "был фон, всё забанено, не отвлекайся".
+// FormatBackgroundDigest is the low-noise hourly summary in tree style.
+// No AI, no severity bar — this is the "ничего срочного" channel.
 func FormatBackgroundDigest(serverName string, eventCount int, windowMinutes int, summaries []IPSummary) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "🔵 <b>Фоновый дайджест — %s</b>\n", htmlEscape(serverName))
-	fmt.Fprintf(&b, "За последние %d мин: %d событий с %d IP, все заблокированы.\n", windowMinutes, eventCount, len(summaries))
+	fmt.Fprintf(&b, "<b>🟦 Фоновый дайджест — %s</b>\n", htmlEscape(serverName))
+	fmt.Fprintf(&b, "├ Окно: %d мин\n", windowMinutes)
+	fmt.Fprintf(&b, "└ %d событий с %d IP — все заблокированы\n", eventCount, len(summaries))
 
 	if len(summaries) > 0 {
-		b.WriteString("\nТоп IP:\n")
+		b.WriteString("\n<b>Топ IP:</b>\n<pre>")
 		shown := 5
 		if len(summaries) < shown {
 			shown = len(summaries)
 		}
 		for i := 0; i < shown; i++ {
 			s := summaries[i]
-			fmt.Fprintf(&b, "  • <code>%s</code> — %s×%d\n",
+			fmt.Fprintf(&b, "%-15s  %s×%d\n",
 				htmlEscape(s.IP), htmlEscape(strings.Join(s.Types, "/")), s.EventCount)
 		}
 		if len(summaries) > shown {
-			fmt.Fprintf(&b, "  • …и ещё %d IP\n", len(summaries)-shown)
+			fmt.Fprintf(&b, "...и ещё %d IP\n", len(summaries)-shown)
 		}
+		b.WriteString("</pre>")
 	}
 	return b.String()
 }
 
-// scoreMarker maps a per-IP score to a coloured emoji for the batch list.
-func scoreMarker(score int) string {
-	switch {
-	case score >= 70:
-		return "🔴"
-	case score >= 40:
-		return "🟡"
-	default:
-		return "⚪"
-	}
-}
-
-// FormatAgentStartup is sent when goronin starts. Confirms to the operator
-// that traps are listening, prints the running version (so it's obvious that
-// an update actually rolled), and lists the file canaries under watch plus
-// any that failed to be created (those are real problems — disk full, RO
-// mount — and the operator needs to see them).
+// FormatAgentStartup is sent when goronin starts. Compact: confirms the
+// agent is up, the version (so an update is visibly applied), how many
+// traps and canaries are armed. We deliberately don't list ports — the
+// operator can `goronin status` if they need them, and showing four
+// random ports in every startup message was noise.
 func FormatAgentStartup(serverName, version string, traps, canaries, canariesFailed []string) string {
 	t := time.Now().In(mustTZ()).Format("02.01.2006 15:04:05 MST")
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "🪴 <b>GORONIN запущен — %s</b>\n", htmlEscape(serverName))
-	fmt.Fprintf(&b, "Версия: <code>%s</code>\n\n", htmlEscape(version))
-	fmt.Fprintf(&b, "Ловушки: %s\n", htmlEscape(strings.Join(traps, ", ")))
+	fmt.Fprintf(&b, "<b>🪴 GORONIN запущен — %s</b>\n", htmlEscape(serverName))
+	fmt.Fprintf(&b, "├ Версия: <code>%s</code>\n", htmlEscape(version))
+	fmt.Fprintf(&b, "├ Ловушки: %d активны\n", len(traps))
 
-	// Canaries: cap at 10 entries shown, summarise the rest as "+N", so a
-	// box with many auto-discovered secrets doesn't blow up the message.
-	if n := len(canaries); n > 0 {
-		shown := canaries
-		extra := 0
-		if n > 10 {
-			shown = canaries[:10]
-			extra = n - 10
-		}
-		fmt.Fprintf(&b, "Канарейки (%d): %s", n, htmlEscape(strings.Join(shown, ", ")))
-		if extra > 0 {
-			fmt.Fprintf(&b, " +%d", extra)
-		}
-		b.WriteString("\n")
+	if len(canariesFailed) > 0 {
+		fmt.Fprintf(&b, "├ Канарейки: %d активны, %d не удалось создать\n", len(canaries), len(canariesFailed))
+	} else if len(canaries) > 0 {
+		fmt.Fprintf(&b, "├ Канарейки: %d активны\n", len(canaries))
 	} else {
-		b.WriteString("Канарейки: нет\n")
+		b.WriteString("├ Канарейки: нет\n")
 	}
 
-	// Show failures separately so they don't look like normal canaries —
-	// these are paths the OS refused (no write permission, RO mount, full
-	// disk). Operator should investigate.
-	if n := len(canariesFailed); n > 0 {
-		shown := canariesFailed
-		extra := 0
-		if n > 10 {
-			shown = canariesFailed[:10]
-			extra = n - 10
-		}
-		fmt.Fprintf(&b, "⚠ Не удалось создать (%d): %s", n, htmlEscape(strings.Join(shown, ", ")))
-		if extra > 0 {
-			fmt.Fprintf(&b, " +%d", extra)
-		}
-		b.WriteString("\n")
-	}
-
-	fmt.Fprintf(&b, "Время: %s", t)
+	fmt.Fprintf(&b, "└ Время: %s", t)
 	return b.String()
 }
 
