@@ -429,17 +429,18 @@ func runHealth() {
 		return c + s + cReset
 	}
 
-	fmt.Printf("\n%s GORONIN health check%s\n\n", color(cBold, ""), color("", ""))
+	fmt.Printf("\n%sGORONIN health check%s\n\n", color(cBold, ""), color("", ""))
 
-	ok := func(label, value string) {
-		fmt.Printf("  %s %s         %s\n", color(cOK, "✓"), padRight(label, 12), value)
+	// Visual column width for the label. Cyrillic characters are 2 bytes
+	// each in UTF-8 but render as one cell — strings.Repeat after a byte-
+	// based padRight made columns drift. padCols counts runes instead.
+	const labelCols = 10
+	row := func(marker, label, value string) {
+		fmt.Printf("  %s  %s  %s\n", marker, padCols(label, labelCols), value)
 	}
-	warn := func(label, value string) {
-		fmt.Printf("  %s %s         %s\n", color(cWarn, "⚠"), padRight(label, 12), value)
-	}
-	bad := func(label, value string) {
-		fmt.Printf("  %s %s         %s\n", color(cErr, "✗"), padRight(label, 12), value)
-	}
+	ok := func(label, value string) { row(color(cOK, "✓"), label, value) }
+	warn := func(label, value string) { row(color(cWarn, "⚠"), label, value) }
+	bad := func(label, value string) { row(color(cErr, "✗"), label, value) }
 
 	overallOK := true
 
@@ -474,7 +475,7 @@ func runHealth() {
 	if len(ports) == 0 {
 		warn("ловушки", "не найдены в логах — сервис только что стартовал?")
 	} else {
-		fmt.Printf("  %s %s\n", color(cOK, "✓"), padRight("ловушки", 12))
+		ok("ловушки", "")
 		for _, p := range ports {
 			alive := isPortListening(p.port)
 			marker := color(cOK, "✓")
@@ -484,7 +485,7 @@ func runHealth() {
 				tail = "  (порт не слушает!)"
 				overallOK = false
 			}
-			fmt.Printf("                  %s  %-5s %d%s\n", marker, p.kind, p.port, tail)
+			fmt.Printf("                %s  %-5s %d%s\n", marker, p.kind, p.port, tail)
 		}
 	}
 
@@ -787,11 +788,18 @@ func isTerminal(f *os.File) bool {
 	return (fi.Mode() & os.ModeCharDevice) != 0
 }
 
-func padRight(s string, width int) string {
-	if len(s) >= width {
+// padCols pads s with spaces to the requested column width, counting runes
+// (visual cells) instead of bytes. Crucial for Cyrillic/UTF-8 labels where
+// "сервис" is 6 cells but 12 bytes — byte-based padding made columns drift.
+func padCols(s string, cols int) string {
+	width := 0
+	for range s {
+		width++
+	}
+	if width >= cols {
 		return s
 	}
-	return s + strings.Repeat(" ", width-len(s))
+	return s + strings.Repeat(" ", cols-width)
 }
 
 // ---------- unban / reset ----------
