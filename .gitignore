@@ -7,7 +7,10 @@ dist/
 coverage/
 docs/
 promo/
-frontend/
+
+# фронт временно публикуем, чтобы лендинг обновился — потом снова скроем
+frontend/node_modules/
+frontend/dist/
 
 # --- Go agent ---
 # собранные бинари не коммитим — релизит CI
