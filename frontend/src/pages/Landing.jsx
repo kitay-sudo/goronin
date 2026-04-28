@@ -473,7 +473,16 @@ function Versus() {
         </Reveal>
 
         <Reveal delay={0.15}>
-          <div className="mt-px overflow-hidden rounded-2xl border border-zinc-900/80 divide-y divide-zinc-900/80">
+          <div className="mt-6 overflow-hidden rounded-2xl border border-zinc-900/80 divide-y divide-zinc-900/80">
+            <div className="hidden md:grid md:grid-cols-[200px_1fr_1fr] bg-zinc-950/60">
+              <div className="px-5 py-3 border-r border-zinc-900/80" />
+              <div className="px-5 py-3 text-xs uppercase tracking-wider text-emerald-400 font-semibold border-r border-zinc-900/80">
+                GORONIN
+              </div>
+              <div className="px-5 py-3 text-xs uppercase tracking-wider text-zinc-400 font-semibold">
+                fail2ban / CrowdSec
+              </div>
+            </div>
             {rows.map((r) => (
               <div
                 key={r.label}
@@ -482,10 +491,12 @@ function Versus() {
                 <div className="px-5 py-4 md:py-5 text-xs uppercase tracking-wider text-zinc-500 font-medium md:border-r border-zinc-900/80 flex md:items-center">
                   {r.label}
                 </div>
-                <div className="px-5 py-3 md:py-5 text-sm text-zinc-200 md:border-r border-zinc-900/80 leading-relaxed">
+                <div className="px-5 pt-1 pb-2 md:py-5 text-sm text-zinc-200 md:border-r border-zinc-900/80 leading-relaxed">
+                  <span className="md:hidden block text-[10px] uppercase tracking-wider text-emerald-400 font-semibold mb-1">GORONIN</span>
                   {r.goronin}
                 </div>
-                <div className="px-5 py-3 pb-5 md:py-5 text-sm text-zinc-400 leading-relaxed">
+                <div className="px-5 pt-1 pb-5 md:py-5 text-sm text-zinc-400 leading-relaxed">
+                  <span className="md:hidden block text-[10px] uppercase tracking-wider text-zinc-400 font-semibold mb-1">fail2ban / CrowdSec</span>
                   {r.classic}
                 </div>
               </div>

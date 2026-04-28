@@ -131,15 +131,15 @@ var typeLabelsShort = map[string]string{
 func severityHeader(severity string) string {
 	switch strings.ToUpper(severity) {
 	case "КРИТИЧЕСКАЯ":
-		return "🟥 КРИТИЧЕСКАЯ"
+		return "🥊 КРИТИЧЕСКАЯ"
 	case "ВЫСОКАЯ":
-		return "🟧 ВЫСОКАЯ"
+		return "🍑 ВЫСОКАЯ"
 	case "СРЕДНЯЯ":
-		return "🟨 СРЕДНЯЯ"
+		return "🍔 СРЕДНЯЯ"
 	case "НИЗКАЯ":
-		return "🟩 НИЗКАЯ"
+		return "🥝 НИЗКАЯ"
 	default:
-		return "🟨 СРЕДНЯЯ"
+		return "🍔 СРЕДНЯЯ"
 	}
 }
 
@@ -241,37 +241,32 @@ func FormatEventAlert(serverName string, ev protocol.EventRequest, aiAnalysis st
 }
 
 // formatAIBody takes the AI response (with "Severity:" already stripped)
-// and renders it for Telegram. We expect the model to emit labelled lines
-// like "Что произошло: ..." plus a "Команды:" block followed by shell
-// one-liners — wrap the commands in <pre> so they render as a copyable
-// monospace block. Anything we don't recognise is escaped and shown as-is.
+// and renders it for Telegram in tree style: first labelled line is the
+// root, subsequent labelled lines get ├ (and the last one └). "Команды:"
+// becomes a <pre> block. Anything else is escaped and shown as-is.
 func formatAIBody(body string) string {
+	type labelledLine struct{ label, rest string }
+
 	lines := strings.Split(body, "\n")
 	var out strings.Builder
 	var inCommands bool
 	var cmds []string
 
-	flushCommands := func() {
-		if len(cmds) == 0 {
-			return
-		}
-		out.WriteString("<pre>")
-		out.WriteString(htmlEscape(strings.Join(cmds, "\n")))
-		out.WriteString("</pre>\n")
-		cmds = nil
-	}
+	// First pass: collect labelled lines (non-Команды) so we know which is
+	// last for the └ vs ├ choice. Everything else passes through to a
+	// "tail" buffer that's emitted after the labelled tree.
+	var labelled []labelledLine
+	var tail []string
 
 	for _, raw := range lines {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			if inCommands {
-				flushCommands()
 				inCommands = false
 			}
 			continue
 		}
 		if strings.HasPrefix(line, "Команды:") {
-			flushCommands()
 			inCommands = true
 			continue
 		}
@@ -279,17 +274,36 @@ func formatAIBody(body string) string {
 			cmds = append(cmds, line)
 			continue
 		}
-		// Bold the label part ("Что произошло:" / "Что делать:" / etc.)
 		if idx := strings.Index(line, ":"); idx > 0 && idx < 40 {
-			label := line[:idx]
-			rest := strings.TrimSpace(line[idx+1:])
-			fmt.Fprintf(&out, "<b>%s:</b> %s\n", htmlEscape(label), htmlEscape(rest))
+			labelled = append(labelled, labelledLine{label: line[:idx], rest: strings.TrimSpace(line[idx+1:])})
 		} else {
-			out.WriteString(htmlEscape(line))
-			out.WriteString("\n")
+			tail = append(tail, line)
 		}
 	}
-	flushCommands()
+
+	for i, l := range labelled {
+		var prefix string
+		switch {
+		case i == 0:
+			prefix = ""
+		case i == len(labelled)-1:
+			prefix = "└ "
+		default:
+			prefix = "├ "
+		}
+		fmt.Fprintf(&out, "%s<b>%s:</b> %s\n", prefix, htmlEscape(l.label), htmlEscape(l.rest))
+	}
+
+	for _, line := range tail {
+		out.WriteString(htmlEscape(line))
+		out.WriteString("\n")
+	}
+
+	if len(cmds) > 0 {
+		out.WriteString("<pre>")
+		out.WriteString(htmlEscape(strings.Join(cmds, "\n")))
+		out.WriteString("</pre>\n")
+	}
 	return out.String()
 }
 
@@ -357,6 +371,20 @@ type IPSummary struct {
 	Score      int
 	EventCount int
 	Types      []string // distinct trap types this IP hit, ordered by name
+
+	// Blocked is true if firewall has an active block for this IP.
+	// BlockDuration is the human label ("1ч", "24ч") used in the alert footer.
+	Blocked       bool
+	BlockDuration string
+}
+
+// trapLabel maps short type code to a Russian label for IP detail rows.
+var trapLabel = map[string]string{
+	"SSH":  "SSH-ловушка",
+	"HTTP": "HTTP-ловушка",
+	"FTP":  "FTP-ловушка",
+	"DB":   "DB-ловушка",
+	"file": "Файловая ловушка",
 }
 
 // FormatBatchAlert produces the urgent 5-minute sweep message in tree style.
@@ -374,19 +402,53 @@ func FormatBatchAlert(serverName string, totalScore, eventCount int, windowMinut
 		}
 	}
 
+	blockedCount := 0
+	for _, s := range summaries {
+		if s.Blocked {
+			blockedCount++
+		}
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "<b>%s — %s</b>\n", severityHeader(severity), htmlEscape(serverName))
 	fmt.Fprintf(&b, "├ Окно: %d мин\n", windowMinutes)
 	fmt.Fprintf(&b, "├ События: %d с %d IP\n", eventCount, len(summaries))
-	fmt.Fprintf(&b, "└ Общий score: %d/100\n", totalScore)
+	if blockedCount > 0 {
+		fmt.Fprintf(&b, "├ Общий score: %d/100\n", totalScore)
+		fmt.Fprintf(&b, "└ Заблокировано: %d IP\n", blockedCount)
+	} else {
+		fmt.Fprintf(&b, "└ Общий score: %d/100\n", totalScore)
+	}
 
 	if len(summaries) > 0 {
-		b.WriteString("\n<b>IP:</b>\n<pre>")
-		for _, s := range summaries {
-			fmt.Fprintf(&b, "%-15s  score %3d  %s×%d\n",
-				htmlEscape(s.IP), s.Score, htmlEscape(strings.Join(s.Types, "/")), s.EventCount)
+		b.WriteString("\n<b>IP:</b>\n")
+		for i, s := range summaries {
+			ipLine := fmt.Sprintf("<code>%s</code>    score %d/100", htmlEscape(s.IP), s.Score)
+			if s.Blocked {
+				suffix := "🛡 заблокирован"
+				if s.BlockDuration != "" {
+					suffix = fmt.Sprintf("🛡 заблокирован (%s)", s.BlockDuration)
+				}
+				ipLine += "    " + suffix
+			}
+			b.WriteString(ipLine)
+			b.WriteString("\n")
+
+			for j, tp := range s.Types {
+				prefix := "├"
+				if j == len(s.Types)-1 {
+					prefix = "└"
+				}
+				label, ok := trapLabel[tp]
+				if !ok {
+					label = tp
+				}
+				fmt.Fprintf(&b, "  %s %s\n", prefix, htmlEscape(label))
+			}
+			if i < len(summaries)-1 {
+				b.WriteString("\n")
+			}
 		}
-		b.WriteString("</pre>")
 	}
 
 	if body != "" {

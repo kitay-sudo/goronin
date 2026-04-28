@@ -290,6 +290,9 @@ func runDaemon() {
 	fw.Start()
 	defer fw.Shutdown()
 
+	// Wire firewall into alerter so batch alerts can show "🛡 заблокирован" markers.
+	al.WithFirewall(fw)
+
 	// onEvent: every trap/watcher event flows through here. Firewall reaction
 	// runs first (so the alert reflects what we actually did). Then the
 	// event is routed:

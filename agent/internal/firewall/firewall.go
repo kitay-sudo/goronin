@@ -355,6 +355,22 @@ func (f *Firewall) GetEntry(ip string) *BlockEntry {
 	return nil
 }
 
+// BlockInfo returns whether an IP is currently blocked and the time
+// remaining on the block. Implements alerter.FirewallStatus.
+func (f *Firewall) BlockInfo(ip string) (bool, time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.blocked[ip]
+	if !ok {
+		return false, 0
+	}
+	remaining := time.Until(e.ExpiresAt)
+	if remaining < 0 {
+		remaining = 0
+	}
+	return true, remaining
+}
+
 // ListBlocked returns a snapshot of all active blocks.
 func (f *Firewall) ListBlocked() []BlockEntry {
 	f.mu.Lock()

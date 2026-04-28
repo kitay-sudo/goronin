@@ -163,7 +163,8 @@ func TestFormatBatchAlert_StructureAndAI(t *testing.T) {
 		"КРИТИЧЕСКАЯ",
 		"1.1.1.1",
 		"2.2.2.2",
-		"SSH/HTTP",
+		"SSH-ловушка",
+		"HTTP-ловушка",
 		"Характер",
 	} {
 		if !strings.Contains(out, want) {

@@ -20,6 +20,7 @@ package alerter
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sort"
 	"time"
@@ -39,11 +40,19 @@ const urgentAIThreshold = 30
 // aiTimeout caps per-AI-call latency. LLM endpoints can hang under load.
 const aiTimeout = 25 * time.Second
 
+// FirewallStatus reports whether an IP is currently blocked and for how long.
+// Implemented by *firewall.Firewall — kept as an interface here to avoid a
+// circular dep and to keep this package easy to test.
+type FirewallStatus interface {
+	BlockInfo(ip string) (blocked bool, remaining time.Duration)
+}
+
 // Alerter wires aggregator output → AI → Telegram. Single instance.
 type Alerter struct {
 	serverName string
 	provider   ai.Provider
 	tg         *telegram.Client
+	fw         FirewallStatus // optional — nil means "don't annotate blocks"
 }
 
 // New constructs an alerter with the three required dependencies.
@@ -53,6 +62,13 @@ func New(serverName string, provider ai.Provider, tg *telegram.Client) *Alerter 
 		provider:   provider,
 		tg:         tg,
 	}
+}
+
+// WithFirewall attaches a firewall status reader so batch alerts can show
+// "🛡 заблокирован (1ч)" markers. Returns the alerter for chaining.
+func (a *Alerter) WithFirewall(fw FirewallStatus) *Alerter {
+	a.fw = fw
+	return a
 }
 
 // FlushBatch is the aggregator.FlushFunc. Routes urgent vs background to
@@ -103,7 +119,7 @@ func (a *Alerter) SendStartup(version string, trapDescriptions, canaries, canari
 // noise that happens to surface as urgent (shouldn't happen given the
 // aggregator's own threshold, but cheap insurance).
 func (a *Alerter) sendUrgentBatch(b aggregator.Batch) {
-	summaries := summariesFromBatch(b)
+	summaries := a.summariesFromBatch(b)
 	windowMin := minutesBetween(b.StartedAt, b.ClosedAt)
 
 	var analysis string
@@ -134,7 +150,7 @@ func (a *Alerter) sendUrgentBatch(b aggregator.Batch) {
 
 // sendBackgroundDigest handles a 1-hour low-noise summary. Never calls AI.
 func (a *Alerter) sendBackgroundDigest(b aggregator.Batch) {
-	summaries := summariesFromBatch(b)
+	summaries := a.summariesFromBatch(b)
 	windowMin := minutesBetween(b.StartedAt, b.ClosedAt)
 
 	msg := telegram.FormatBackgroundDigest(a.serverName, b.EventCount, windowMin, summaries)
@@ -145,7 +161,8 @@ func (a *Alerter) sendBackgroundDigest(b aggregator.Batch) {
 
 // summariesFromBatch flattens an aggregator.Batch into the simpler shape
 // used by the Telegram formatter (just IP + counts, no full event slices).
-func summariesFromBatch(b aggregator.Batch) []telegram.IPSummary {
+// If a firewall is attached, blocked-state and duration are filled in.
+func (a *Alerter) summariesFromBatch(b aggregator.Batch) []telegram.IPSummary {
 	out := make([]telegram.IPSummary, 0, len(b.Groups))
 	for _, g := range b.Groups {
 		typeSet := map[string]struct{}{}
@@ -157,14 +174,42 @@ func summariesFromBatch(b aggregator.Batch) []telegram.IPSummary {
 			types = append(types, t)
 		}
 		sort.Strings(types)
-		out = append(out, telegram.IPSummary{
+
+		s := telegram.IPSummary{
 			IP:         g.SourceIP,
 			Score:      g.Score,
 			EventCount: len(g.Events),
 			Types:      types,
-		})
+		}
+		if a.fw != nil {
+			if blocked, remaining := a.fw.BlockInfo(g.SourceIP); blocked {
+				s.Blocked = true
+				s.BlockDuration = humanDuration(remaining)
+			}
+		}
+		out = append(out, s)
 	}
 	return out
+}
+
+// humanDuration renders a remaining-block window like "1ч", "24ч", "30мин".
+// Aimed at quick-glance Telegram messages, not precision.
+func humanDuration(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	if d < time.Hour {
+		mins := int(d.Round(time.Minute).Minutes())
+		if mins < 1 {
+			mins = 1
+		}
+		return fmt.Sprintf("%dмин", mins)
+	}
+	hours := int(d.Round(time.Hour).Hours())
+	if hours < 1 {
+		hours = 1
+	}
+	return fmt.Sprintf("%dч", hours)
 }
 
 func shortType(t string) string {
