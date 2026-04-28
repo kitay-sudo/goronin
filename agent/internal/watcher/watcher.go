@@ -120,26 +120,33 @@ func (r CanaryResult) All() []string {
 	return out
 }
 
+// CanaryNames is the fixed set of decoy filenames CreateCanaries plants in
+// each watched directory. Exported so other commands (e.g. `goronin health`)
+// can enumerate the same files without duplicating the list.
+var CanaryNames = []string{
+	"passwords_backup.txt",
+	"database_credentials.txt",
+	"admin_keys.json",
+	".aws_credentials",
+	"id_rsa_backup",
+}
+
+// CanaryDirs is the default set of directories where canaries are planted.
+// Daemon passes this to CreateCanaries; health reads it to enumerate files.
+var CanaryDirs = []string{"/root", "/tmp", "/var/www"}
+
 // CreateCanaries plants decoy files in common directories so any read/write
 // to them is a high-confidence attacker signal. Idempotent: re-running on a
 // box that was already set up is a no-op (existing files counted as
 // Existing, not as failures).
 func (w *Watcher) CreateCanaries(dirs []string) CanaryResult {
-	canaryNames := []string{
-		"passwords_backup.txt",
-		"database_credentials.txt",
-		"admin_keys.json",
-		".aws_credentials",
-		"id_rsa_backup",
-	}
-
 	var res CanaryResult
 	for _, dir := range dirs {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			continue
 		}
 
-		for _, name := range canaryNames {
+		for _, name := range CanaryNames {
 			path := filepath.Join(dir, name)
 			canon, err := canonicalizePath(path)
 			if err != nil {

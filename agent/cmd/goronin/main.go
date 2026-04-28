@@ -349,7 +349,7 @@ func runDaemon() {
 		if discovered := watcher.AutoDiscover(); len(discovered) > 0 {
 			fileWatcher.WatchFiles(discovered)
 		}
-		canaryRes := fileWatcher.CreateCanaries([]string{"/root", "/tmp", "/var/www"})
+		canaryRes := fileWatcher.CreateCanaries(watcher.CanaryDirs)
 		canaries = canaryRes.All()
 		canaryFailed = canaryRes.Failed
 		if len(canaries) > 0 {
@@ -489,11 +489,16 @@ func runHealth() {
 	}
 
 	// --- 5. Canaries ---
-	if len(cfg.WatchFiles) == 0 {
-		warn("канарейки", "ни одного файла в watch_files")
+	// Match what the daemon actually watches: configured files + auto-discovered
+	// secrets + the canary grid (CanaryDirs × CanaryNames). Files that don't
+	// exist on disk are counted as missing so a missing /root/.aws_credentials
+	// shows up here, not silently.
+	expected := collectExpectedWatchedFiles(cfg.WatchFiles)
+	if len(expected) == 0 {
+		warn("канарейки", "ни одного отслеживаемого файла")
 	} else {
 		alive, missing := 0, 0
-		for _, f := range cfg.WatchFiles {
+		for _, f := range expected {
 			if _, err := os.Stat(f); err == nil {
 				alive++
 			} else {
@@ -502,8 +507,7 @@ func runHealth() {
 		}
 		msg := fmt.Sprintf("%d файлов отслеживается", alive)
 		if missing > 0 {
-			msg += fmt.Sprintf(", %d отсутствует", missing)
-			warn("канарейки", msg)
+			warn("канарейки", fmt.Sprintf("%s, %d отсутствует", msg, missing))
 		} else {
 			ok("канарейки", msg)
 		}
@@ -619,6 +623,37 @@ func serviceUptime() string {
 	default:
 		return fmt.Sprintf("%ds", secs)
 	}
+}
+
+// collectExpectedWatchedFiles returns the union of files the daemon watches:
+// configured watch_files, AutoDiscover hits, and the canary grid (every
+// CanaryDir × CanaryName combination). Used by `goronin health` to compare
+// against what's actually on disk. Deduplicated, order-stable.
+func collectExpectedWatchedFiles(configured []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(p string) {
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		out = append(out, p)
+	}
+	for _, p := range configured {
+		add(p)
+	}
+	for _, p := range watcher.AutoDiscover() {
+		add(p)
+	}
+	for _, dir := range watcher.CanaryDirs {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			continue
+		}
+		for _, name := range watcher.CanaryNames {
+			add(dir + "/" + name)
+		}
+	}
+	return out
 }
 
 // trapPort is one row of "last reported trap listeners" parsed from journal.
