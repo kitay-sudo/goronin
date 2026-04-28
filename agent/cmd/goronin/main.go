@@ -411,6 +411,8 @@ func labelOf(typ string) string {
 // recent error count. Best-effort — every check catches its own errors so
 // the report always finishes and shows what worked alongside what didn't.
 func runHealth() {
+	mustRoot()
+
 	const (
 		cReset = "\x1b[0m"
 		cOK    = "\x1b[32m"
@@ -441,9 +443,14 @@ func runHealth() {
 
 	overallOK := true
 
-	// --- 1. Service state ---
+	// --- 1. Service state + uptime ---
 	if systemd.IsActive() {
-		ok("сервис", "active (running)")
+		uptime := serviceUptime()
+		if uptime != "" {
+			ok("сервис", fmt.Sprintf("active (running) — uptime %s", uptime))
+		} else {
+			ok("сервис", "active (running)")
+		}
 	} else {
 		bad("сервис", "не запущен — попробуй: sudo goronin start")
 		overallOK = false
@@ -565,6 +572,52 @@ func runHealth() {
 	fmt.Println()
 	if !overallOK {
 		os.Exit(1)
+	}
+}
+
+// serviceUptime returns a human-readable uptime ("1h 24m", "3d 2h", "45s")
+// for the goronin systemd unit. Pulls ActiveEnterTimestamp via `systemctl show`.
+// Returns "" on any parsing failure — the caller falls back to a plain
+// "active (running)" line so the health check never breaks because of this.
+func serviceUptime() string {
+	out, err := exec.Command("systemctl", "show", systemd.ServiceName, "--property=ActiveEnterTimestamp").Output()
+	if err != nil {
+		return ""
+	}
+	// Output: "ActiveEnterTimestamp=Tue 2026-04-28 02:50:53 UTC"
+	line := strings.TrimSpace(string(out))
+	idx := strings.Index(line, "=")
+	if idx < 0 || idx == len(line)-1 {
+		return ""
+	}
+	stamp := strings.TrimSpace(line[idx+1:])
+	if stamp == "" {
+		return ""
+	}
+	// systemd's format: "Tue 2026-04-28 02:50:53 UTC"
+	t, err := time.Parse("Mon 2006-01-02 15:04:05 MST", stamp)
+	if err != nil {
+		return ""
+	}
+	d := time.Since(t)
+	if d < 0 {
+		return ""
+	}
+
+	days := int(d / (24 * time.Hour))
+	hours := int((d % (24 * time.Hour)) / time.Hour)
+	mins := int((d % time.Hour) / time.Minute)
+	secs := int((d % time.Minute) / time.Second)
+
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh", days, hours)
+	case hours > 0:
+		return fmt.Sprintf("%dh %dm", hours, mins)
+	case mins > 0:
+		return fmt.Sprintf("%dm %ds", mins, secs)
+	default:
+		return fmt.Sprintf("%ds", secs)
 	}
 }
 
