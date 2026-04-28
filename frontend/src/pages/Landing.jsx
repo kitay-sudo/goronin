@@ -16,6 +16,8 @@ import {
   Send,
   Shield,
   Eye,
+  History,
+  Sparkles,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import GridBackground from '../components/landing/GridBackground';
@@ -44,6 +46,7 @@ export default function Landing() {
       <FAQ />
       <Support />
       <CTA />
+      <Changelog />
       <Footer />
       <BackToTop />
     </div>
@@ -101,6 +104,7 @@ function Nav() {
           <a href="#how" className="hover:text-zinc-100 transition-colors">Как работает</a>
           <a href="#install" className="hover:text-zinc-100 transition-colors">Установка</a>
           <a href="#faq" className="hover:text-zinc-100 transition-colors">FAQ</a>
+          <a href="#changelog" className="hover:text-zinc-100 transition-colors">Изменения</a>
           <a href="#support" className="text-amber-300/90 hover:text-amber-200 transition-colors inline-flex items-center gap-1.5">
             <Heart size={12} fill="currentColor" />
             Стена чести
@@ -1073,6 +1077,152 @@ function CTA() {
   );
 }
 
+// Журнал релизов. Чтобы добавить запись — допиши объект в начало массива
+// и сделай commit. Самая верхняя запись автоматически получает плашку "latest".
+//   version    — строка вида "0.2.0"
+//   date       — ISO-дата релиза
+//   title      — короткий заголовок одной строкой
+//   highlights — 2-4 буллита с самым важным; не нужно копировать весь CHANGELOG
+const CHANGELOG = [
+  {
+    version: '0.2.0',
+    date: '2026-04-28',
+    title: 'Двухуровневая агрегация алертов',
+    highlights: [
+      'Сводный алерт на скан вместо 30 отдельных — AI-вызовов в сутки 5–10 вместо 200+',
+      'Новые тунаблы urgent_window / background_window / interest_threshold в config.yml',
+      'Мгновенная ветка для file canary — write/remove идут мимо агрегатора',
+      'HOW_IT_WORKS.md в корне репо с расчётами стоимости',
+    ],
+  },
+  {
+    version: '0.1.0',
+    date: '2026-04-27',
+    title: 'Первый open-source релиз',
+    highlights: [
+      'Полностью standalone — один Go-бинарь, без бэкенда и аккаунтов',
+      'AI-провайдеры на выбор: Claude / GPT / Gemini, опционально',
+      'Persistent state через bbolt — баны переживают reboot',
+      'install.sh: curl | sudo bash → wizard → systemd-сервис за минуту',
+    ],
+  },
+];
+
+const RELEASES_URL = 'https://github.com/kitay-sudo/goronin/releases';
+const CHANGELOG_URL = 'https://github.com/kitay-sudo/goronin/blob/main/CHANGELOG.md';
+
+function Changelog() {
+  const dateFormatter = new Intl.DateTimeFormat('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+
+  return (
+    <section id="changelog" className="relative py-24 md:py-32 border-t border-zinc-900/80 overflow-hidden">
+      <KanjiWatermark
+        char="記"
+        className="right-[5%] top-[15%] text-[160px] md:text-[240px] hidden md:block"
+        target={0.03}
+      />
+
+      <div className="relative max-w-3xl mx-auto px-5">
+        <Reveal>
+          <div className="text-center">
+            <JapaneseDivider kanji="記" label="The Chronicle" />
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
+              Журнал изменений
+            </h2>
+            <p className="mt-4 text-zinc-400 leading-relaxed max-w-xl mx-auto">
+              Что меняется в каждом релизе и когда он был выпущен — чтобы было видно,
+              что проект живой и в каком направлении движется.
+            </p>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.1}>
+          <ol className="mt-12 relative border-l border-zinc-800/80 ml-3">
+            {CHANGELOG.map((rel, idx) => {
+              const isLatest = idx === 0;
+              const dateLabel = (() => {
+                const d = new Date(rel.date);
+                return Number.isNaN(d.getTime()) ? rel.date : dateFormatter.format(d);
+              })();
+
+              return (
+                <li key={rel.version} className="relative pl-8 pb-10 last:pb-0">
+                  <span
+                    className={`absolute -left-[7px] top-1.5 w-3.5 h-3.5 rounded-full border-2 ${
+                      isLatest
+                        ? 'border-emerald-400 bg-emerald-500/30 shadow-[0_0_0_4px_rgba(16,185,129,0.08)]'
+                        : 'border-zinc-700 bg-zinc-900'
+                    }`}
+                    aria-hidden
+                  />
+
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <span className="text-base md:text-lg font-mono font-semibold text-zinc-100">
+                      v{rel.version}
+                    </span>
+                    {isLatest && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 text-[10px] uppercase tracking-widest font-semibold">
+                        <Sparkles size={10} />
+                        Latest
+                      </span>
+                    )}
+                    <span className="text-xs text-zinc-500 font-mono ml-auto">
+                      <time dateTime={rel.date}>{dateLabel}</time>
+                    </span>
+                  </div>
+
+                  <h3 className="text-sm md:text-base font-semibold text-zinc-200 mb-3">
+                    {rel.title}
+                  </h3>
+
+                  <ul className="space-y-1.5">
+                    {rel.highlights.map((h, i) => (
+                      <li
+                        key={i}
+                        className="flex gap-2 text-sm text-zinc-400 leading-relaxed"
+                      >
+                        <span className="shrink-0 mt-2 w-1 h-1 rounded-full bg-zinc-600" />
+                        <span>{h}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              );
+            })}
+          </ol>
+        </Reveal>
+
+        <Reveal delay={0.2}>
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+            <a
+              href={CHANGELOG_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100 border border-zinc-800 hover:border-zinc-700 rounded-lg px-4 py-2 transition-colors"
+            >
+              <History size={14} />
+              Полный CHANGELOG
+            </a>
+            <a
+              href={RELEASES_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100 border border-zinc-800 hover:border-zinc-700 rounded-lg px-4 py-2 transition-colors"
+            >
+              <Github size={14} />
+              Все релизы на GitHub
+            </a>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
 function Footer() {
   return (
     <footer className="border-t border-zinc-900/80 py-10">
@@ -1093,6 +1243,7 @@ function Footer() {
           <a href="#features" className="hover:text-zinc-300 transition-colors">Возможности</a>
           <a href="#install" className="hover:text-zinc-300 transition-colors">Установка</a>
           <a href="#faq" className="hover:text-zinc-300 transition-colors">FAQ</a>
+          <a href="#changelog" className="hover:text-zinc-300 transition-colors">Изменения</a>
           <a href="#support" className="hover:text-zinc-300 transition-colors">Поддержать</a>
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors flex items-center gap-1.5">
             <Github size={14} /> GitHub
