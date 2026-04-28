@@ -89,10 +89,10 @@ func (a *Alerter) HandleInstant(ev protocol.EventRequest) {
 
 // SendStartup posts a one-shot "agent online" notification with the list
 // of active traps, the running version (so updates are visibly confirmed),
-// and the file canaries created at boot. Called from main after traps and
-// the watcher have finished initialising.
-func (a *Alerter) SendStartup(version string, trapDescriptions, canaries []string) {
-	msg := telegram.FormatAgentStartup(a.serverName, version, trapDescriptions, canaries)
+// the file canaries currently being watched, and any canaries that failed
+// to be created. Called from main after traps and watcher init.
+func (a *Alerter) SendStartup(version string, trapDescriptions, canaries, canariesFailed []string) {
+	msg := telegram.FormatAgentStartup(a.serverName, version, trapDescriptions, canaries, canariesFailed)
 	if err := a.tg.Send(context.Background(), msg); err != nil {
 		log.Printf("[alerter] startup telegram send failed: %v", err)
 	}

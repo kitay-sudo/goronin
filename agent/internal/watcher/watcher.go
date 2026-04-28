@@ -100,8 +100,31 @@ func (w *Watcher) WatchFiles(paths []string) {
 	}
 }
 
-// CreateCanaries creates decoy files in common directories
-func (w *Watcher) CreateCanaries(dirs []string) []string {
+// CanaryResult is what CreateCanaries returns. The split between created /
+// existing / failed lets callers (notably the startup message) report an
+// accurate state: "10 canaries active" is true even on a restart where
+// nothing new was created — but "5 failed to create" is a real problem the
+// operator needs to see.
+type CanaryResult struct {
+	Created  []string // newly created on this call
+	Existing []string // already on disk from a previous run
+	Failed   []string // tried to create, OS said no
+}
+
+// All returns Created + Existing — every canary that's actually being
+// watched, regardless of who created it. This is what users care about.
+func (r CanaryResult) All() []string {
+	out := make([]string, 0, len(r.Created)+len(r.Existing))
+	out = append(out, r.Created...)
+	out = append(out, r.Existing...)
+	return out
+}
+
+// CreateCanaries plants decoy files in common directories so any read/write
+// to them is a high-confidence attacker signal. Idempotent: re-running on a
+// box that was already set up is a no-op (existing files counted as
+// Existing, not as failures).
+func (w *Watcher) CreateCanaries(dirs []string) CanaryResult {
 	canaryNames := []string{
 		"passwords_backup.txt",
 		"database_credentials.txt",
@@ -110,7 +133,7 @@ func (w *Watcher) CreateCanaries(dirs []string) []string {
 		"id_rsa_backup",
 	}
 
-	var created []string
+	var res CanaryResult
 	for _, dir := range dirs {
 		if _, err := os.Stat(dir); os.IsNotExist(err) {
 			continue
@@ -118,26 +141,29 @@ func (w *Watcher) CreateCanaries(dirs []string) []string {
 
 		for _, name := range canaryNames {
 			path := filepath.Join(dir, name)
+			canon, err := canonicalizePath(path)
+			if err != nil {
+				canon = path
+			}
+
 			if _, err := os.Stat(path); err == nil {
-				continue // already exists
+				// Already there from a previous run — still want to watch it.
+				res.Existing = append(res.Existing, canon)
+				continue
 			}
 
 			content := generateFakeContent(name)
 			if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 				log.Printf("[watcher] Failed to create canary %s: %v", path, err)
+				res.Failed = append(res.Failed, canon)
 				continue
 			}
-
-			canon, err := canonicalizePath(path)
-			if err != nil {
-				canon = path
-			}
-			created = append(created, canon)
+			res.Created = append(res.Created, canon)
 			log.Printf("[watcher] Canary created: %s", canon)
 		}
 	}
 
-	return created
+	return res
 }
 
 // AutoDiscover finds sensitive files on the system.

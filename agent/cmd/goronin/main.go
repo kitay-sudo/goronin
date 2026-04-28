@@ -322,8 +322,12 @@ func runDaemon() {
 	}
 
 	// File watcher: configured files + auto-discovered secrets + canaries.
-	// canaries is hoisted out so we can include it in the startup message.
+	// canaries is hoisted so the startup message can show it. We pass
+	// Created+Existing (every canary actually under inotify), not only newly
+	// created — so a restart on a box already set up correctly reports the
+	// canaries as active rather than "not created".
 	var canaries []string
+	var canaryFailed []string
 	fileWatcher, err := watcher.New(onEvent)
 	if err != nil {
 		log.Printf("[goronin] file watcher unavailable: %v", err)
@@ -334,7 +338,9 @@ func runDaemon() {
 		if discovered := watcher.AutoDiscover(); len(discovered) > 0 {
 			fileWatcher.WatchFiles(discovered)
 		}
-		canaries = fileWatcher.CreateCanaries([]string{"/root", "/tmp", "/var/www"})
+		canaryRes := fileWatcher.CreateCanaries([]string{"/root", "/tmp", "/var/www"})
+		canaries = canaryRes.All()
+		canaryFailed = canaryRes.Failed
 		if len(canaries) > 0 {
 			fileWatcher.WatchFiles(canaries)
 		}
@@ -348,7 +354,7 @@ func runDaemon() {
 	for _, t := range running {
 		descs = append(descs, fmt.Sprintf("%s:%d", labelOf(t.Type), t.Port))
 	}
-	al.SendStartup(version, descs, canaries)
+	al.SendStartup(version, descs, canaries, canaryFailed)
 
 	log.Println("[goronin] daemon ready")
 

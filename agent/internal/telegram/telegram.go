@@ -268,8 +268,10 @@ func scoreMarker(score int) string {
 
 // FormatAgentStartup is sent when goronin starts. Confirms to the operator
 // that traps are listening, prints the running version (so it's obvious that
-// an update actually rolled), and lists the file canaries created at boot.
-func FormatAgentStartup(serverName, version string, traps, canaries []string) string {
+// an update actually rolled), and lists the file canaries under watch plus
+// any that failed to be created (those are real problems — disk full, RO
+// mount — and the operator needs to see them).
+func FormatAgentStartup(serverName, version string, traps, canaries, canariesFailed []string) string {
 	t := time.Now().In(mustTZ()).Format("02.01.2006 15:04:05 MST")
 
 	var b strings.Builder
@@ -277,9 +279,8 @@ func FormatAgentStartup(serverName, version string, traps, canaries []string) st
 	fmt.Fprintf(&b, "Версия: <code>%s</code>\n\n", htmlEscape(version))
 	fmt.Fprintf(&b, "Ловушки: %s\n", htmlEscape(strings.Join(traps, ", ")))
 
-	// Canaries can be a long list, and the exact paths matter (the operator
-	// needs to know which files NOT to touch). Show all of them but cap at
-	// 10 to keep the message readable; the rest are summarised as "+N".
+	// Canaries: cap at 10 entries shown, summarise the rest as "+N", so a
+	// box with many auto-discovered secrets doesn't blow up the message.
 	if n := len(canaries); n > 0 {
 		shown := canaries
 		extra := 0
@@ -293,7 +294,24 @@ func FormatAgentStartup(serverName, version string, traps, canaries []string) st
 		}
 		b.WriteString("\n")
 	} else {
-		b.WriteString("Канарейки: не созданы (нет прав на запись или файлы уже существуют)\n")
+		b.WriteString("Канарейки: нет\n")
+	}
+
+	// Show failures separately so they don't look like normal canaries —
+	// these are paths the OS refused (no write permission, RO mount, full
+	// disk). Operator should investigate.
+	if n := len(canariesFailed); n > 0 {
+		shown := canariesFailed
+		extra := 0
+		if n > 10 {
+			shown = canariesFailed[:10]
+			extra = n - 10
+		}
+		fmt.Fprintf(&b, "⚠ Не удалось создать (%d): %s", n, htmlEscape(strings.Join(shown, ", ")))
+		if extra > 0 {
+			fmt.Fprintf(&b, " +%d", extra)
+		}
+		b.WriteString("\n")
 	}
 
 	fmt.Fprintf(&b, "Время: %s", t)
