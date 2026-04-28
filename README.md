@@ -256,6 +256,40 @@ GOOS=linux GOARCH=arm64 go build -o goronin-linux-arm64 ./cmd/goronin
 
 ---
 
+## Релиз новой версии (для мейнтейнера)
+
+Бинари в GitHub Releases собирает workflow [`release.yml`](.github/workflows/release.yml). Он триггерится только на push тега `v*` — обычный коммит в `main` ничего не публикует. Чтобы выпустить новую версию, используй helper:
+
+**Windows (PowerShell):**
+
+```powershell
+.\scripts\release.ps1 patch    # v0.2.1 → v0.2.2  (баг-фиксы)
+.\scripts\release.ps1 minor    # v0.2.1 → v0.3.0  (новые фичи)
+.\scripts\release.ps1 major    # v0.2.1 → v1.0.0  (ломающие изменения)
+.\scripts\release.ps1 v0.4.0   # явная версия
+```
+
+**Linux/macOS (bash):**
+
+```bash
+./scripts/release.sh patch     # эквивалент ps1, для unix-окружения
+```
+
+Что делает скрипт:
+1. Проверяет что ты на `main`, working tree чистый, локальный коммит совпадает с `origin/main`.
+2. Берёт последний `vX.Y.Z` тег и считает следующий по типу bump.
+3. Показывает все коммиты которые войдут в релиз и спрашивает подтверждение.
+4. Создаёт annotated тег и пушит. Через 2-3 минуты в [Releases](https://github.com/kitay-sudo/goronin/releases) появляются собранные бинари linux/amd64 + arm64 + `SHA256SUMS.txt`.
+
+После релиза **ничего не нужно делать на серверах** — `install.sh` всегда тянет latest. Любой `curl -sSL .../install.sh | sudo bash` подхватит новую версию: если конфиг уже есть — тихо обновит бинарь и перезапустит сервис без потери настроек, если нет — запустит wizard.
+
+Когда какой bump:
+- **patch** — багфикс, не меняет поведение для пользователя (`fix:` коммиты).
+- **minor** — новая фича, обратно совместимая (новая ловушка, новый AI-провайдер, опциональное поле в конфиге).
+- **major** — ломающее изменение (переименование поля в конфиге, удаление CLI-команды, смена формата state.db).
+
+---
+
 ## Тесты
 
 ```bash
@@ -273,6 +307,9 @@ go test ./... -v
 ```
 goronin/
 ├── install.sh              # one-command installer
+├── scripts/
+│   ├── release.ps1         # bump SemVer + tag + push (Windows)
+│   └── release.sh          # то же для Linux/macOS
 ├── README.md
 ├── LICENSE                 # MIT
 │
