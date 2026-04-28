@@ -260,20 +260,16 @@ GOOS=linux GOARCH=arm64 go build -o goronin-linux-arm64 ./cmd/goronin
 
 Бинари в GitHub Releases собирает workflow [`release.yml`](.github/workflows/release.yml). Он триггерится только на push тега `v*` — обычный коммит в `main` ничего не публикует. Чтобы выпустить новую версию, используй helper:
 
-**Windows (PowerShell):**
+**Windows:**
 
-```powershell
-.\scripts\release.ps1 patch    # v0.2.1 → v0.2.2  (баг-фиксы)
-.\scripts\release.ps1 minor    # v0.2.1 → v0.3.0  (новые фичи)
-.\scripts\release.ps1 major    # v0.2.1 → v1.0.0  (ломающие изменения)
-.\scripts\release.ps1 v0.4.0   # явная версия
+```
+scripts\release.bat patch    # v0.2.1 → v0.2.2  (баг-фиксы)
+scripts\release.bat minor    # v0.2.1 → v0.3.0  (новые фичи)
+scripts\release.bat major    # v0.2.1 → v1.0.0  (ломающие изменения)
+scripts\release.bat v0.4.0   # явная версия
 ```
 
-**Linux/macOS (bash):**
-
-```bash
-./scripts/release.sh patch     # эквивалент ps1, для unix-окружения
-```
+Работает в обычном `cmd` и в PowerShell — никаких политик выполнения, кодировок и WSL не требует.
 
 Что делает скрипт:
 1. Проверяет что ты на `main`, working tree чистый, локальный коммит совпадает с `origin/main`.
@@ -308,8 +304,7 @@ go test ./... -v
 goronin/
 ├── install.sh              # one-command installer
 ├── scripts/
-│   ├── release.ps1         # bump SemVer + tag + push (Windows)
-│   └── release.sh          # то же для Linux/macOS
+│   └── release.bat         # bump SemVer + tag + push (Windows, для мейнтейнера)
 ├── README.md
 ├── LICENSE                 # MIT
 │
