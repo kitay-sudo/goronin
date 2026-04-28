@@ -471,21 +471,31 @@ func runHealth() {
 	ok("версия", version)
 
 	// --- 4. Traps: last reported ports from journal + which are still listening ---
+	// One-liner: "4 активны (ssh, http, ftp, db)" if all listening,
+	// otherwise call out the dead one(s) by kind.
 	ports := readLastTrapPorts()
-	if len(ports) == 0 {
+	switch {
+	case len(ports) == 0:
 		warn("ловушки", "не найдены в логах — сервис только что стартовал?")
-	} else {
-		ok("ловушки", "")
+	default:
+		var alive, dead []string
 		for _, p := range ports {
-			alive := isPortListening(p.port)
-			marker := color(cOK, "✓")
-			tail := ""
-			if !alive {
-				marker = color(cErr, "✗")
-				tail = "  (порт не слушает!)"
-				overallOK = false
+			if isPortListening(p.port) {
+				alive = append(alive, p.kind)
+			} else {
+				dead = append(dead, p.kind)
 			}
-			fmt.Printf("                 %s  %-5s %d%s\n", marker, p.kind, p.port, tail)
+		}
+		switch {
+		case len(dead) == 0:
+			ok("ловушки", fmt.Sprintf("%d активны (%s)", len(alive), strings.Join(alive, ", ")))
+		case len(alive) == 0:
+			bad("ловушки", fmt.Sprintf("ни одна не слушает (%s)", strings.Join(dead, ", ")))
+			overallOK = false
+		default:
+			bad("ловушки", fmt.Sprintf("%d активны (%s), %d не слушают (%s)",
+				len(alive), strings.Join(alive, ", "), len(dead), strings.Join(dead, ", ")))
+			overallOK = false
 		}
 	}
 
