@@ -1,25 +1,44 @@
 #!/usr/bin/env bash
-# GORONIN — one-command installer.
+# GORONIN — one-command installer / updater / uninstaller.
 #
 # Usage:
+#   # Первая установка ИЛИ обновление до последней версии (одна команда):
 #   curl -sSL https://raw.githubusercontent.com/kitay-sudo/goronin/main/install.sh | sudo bash
 #
-# What it does:
-#   1. Detects Linux distro and CPU arch.
-#   2. Checks for iptables (required for auto-ban; warns if absent).
-#   3. Downloads the matching binary from the latest GitHub Release.
-#   4. Installs to /usr/local/bin/goronin.
-#   5. Runs `goronin install` — interactive wizard for Telegram, AI, traps.
-#      The wizard writes /etc/goronin/config.yml, registers the systemd unit,
-#      and starts the service.
+#   # Принудительная переустановка с нуля (снесёт конфиг и данные!):
+#   curl -sSL .../install.sh | sudo bash -s -- --reinstall
 #
-# To pin a version, set GORONIN_VERSION=v0.3.1 before piping into bash.
+#   # Только удаление:
+#   curl -sSL .../install.sh | sudo bash -s -- --uninstall
+#
+# Поведение зависит от того, что уже есть на сервере:
+#   - бинаря нет          → скачать + запустить wizard (fresh install)
+#   - бинарь и конфиг     → скачать новую версию, заменить бинарь, рестарт сервиса
+#                           (wizard НЕ запускается, настройки сохраняются)
+#   - --reinstall         → uninstall + fresh install (потеря конфига!)
+#   - --uninstall         → только зачистить
+#
+# Закрепить версию: GORONIN_VERSION=v0.3.1 перед командой.
 
 set -euo pipefail
 
 REPO="kitay-sudo/goronin"
 INSTALL_DIR="/usr/local/bin"
 BIN_NAME="goronin"
+CONFIG_PATH="/etc/goronin/config.yml"
+
+MODE="auto" # auto | reinstall | uninstall
+for arg in "$@"; do
+  case "$arg" in
+    --reinstall) MODE="reinstall" ;;
+    --uninstall) MODE="uninstall" ;;
+    -h|--help)
+      sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "Неизвестный флаг: $arg" >&2; exit 1 ;;
+  esac
+done
 
 # ---------- coloring ----------
 if [[ -t 1 ]]; then
@@ -56,6 +75,30 @@ if ! command -v systemctl >/dev/null 2>&1; then
   die "systemd не найден — поддерживаются только дистрибутивы с systemd (Ubuntu/Debian/CentOS/Arch/...)"
 fi
 
+# ---------- uninstall path (no download needed) ----------
+if [[ "$MODE" == "uninstall" ]]; then
+  if [[ -x "$INSTALL_DIR/$BIN_NAME" ]]; then
+    say "${C_DIM}Удаляю GORONIN…${C_RESET}"
+    "$INSTALL_DIR/$BIN_NAME" uninstall
+  else
+    warn "Бинарь $INSTALL_DIR/$BIN_NAME не найден — нечего удалять."
+  fi
+  exit 0
+fi
+
+# ---------- detect existing install (decides install vs update later) ----------
+EXISTING_BIN=""
+EXISTING_CONFIG=""
+[[ -x "$INSTALL_DIR/$BIN_NAME" ]] && EXISTING_BIN="yes"
+[[ -f "$CONFIG_PATH" ]] && EXISTING_CONFIG="yes"
+
+if [[ "$MODE" == "reinstall" && -n "$EXISTING_BIN" ]]; then
+  warn "Режим --reinstall: сношу текущую установку (конфиг и данные будут утеряны)."
+  "$INSTALL_DIR/$BIN_NAME" uninstall || true
+  EXISTING_BIN=""
+  EXISTING_CONFIG=""
+fi
+
 # ---------- version selection ----------
 VERSION="${GORONIN_VERSION:-}"
 if [[ -z "$VERSION" ]]; then
@@ -88,11 +131,44 @@ if ! "$TMP/$BIN_NAME" version >/dev/null 2>&1; then
   die "Скачанный бинарь не запускается"
 fi
 
-# ---------- install ----------
+# ---------- install binary (always — both fresh install and update) ----------
+# `install -m 0755` is atomic on the same filesystem (rename), so even if
+# the running daemon has the old inode open, swapping it is safe — the
+# kernel keeps the old binary alive until restart.
 install -m 0755 "$TMP/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
-ok "Установлен: $INSTALL_DIR/$BIN_NAME ($($INSTALL_DIR/$BIN_NAME version))"
+ok "Бинарь: $INSTALL_DIR/$BIN_NAME ($($INSTALL_DIR/$BIN_NAME version))"
 
+# ---------- branch: update vs fresh install ----------
+if [[ -n "$EXISTING_CONFIG" ]]; then
+  # Update path: keep the existing config, just bounce the service so the
+  # new binary takes over. No wizard — user already configured this box.
+  say
+  say "${C_DIM}Обнаружен существующий конфиг ($CONFIG_PATH) — обновляю без перезапроса настроек.${C_RESET}"
+  if systemctl list-unit-files goronin.service >/dev/null 2>&1; then
+    systemctl restart goronin.service
+    ok "Сервис перезапущен с новой версией"
+  else
+    warn "Unit-файл systemd не найден — запускаю install для регистрации сервиса."
+    "$INSTALL_DIR/$BIN_NAME" install
+  fi
+  say
+  say "Управление: ${C_OK}goronin status | logs -f | restart${C_RESET}"
+  say "Изменить настройки: ${C_OK}sudo goronin reconfigure${C_RESET}"
+  say "Удалить полностью:  ${C_OK}sudo goronin uninstall${C_RESET}  (или ${C_OK}--uninstall${C_RESET} в этом скрипте)"
+  exit 0
+fi
+
+# Fresh install: run the wizard. It needs a real terminal — pipe from curl
+# is already at EOF, so we reattach stdin to /dev/tty. If there's no tty
+# (cron, CI, `ssh -T`), bail out cleanly and tell the user how to finish.
 say
-say "${C_DIM}Запускаю интерактивную установку…${C_RESET}"
+say "${C_DIM}Свежая установка — запускаю интерактивный мастер…${C_RESET}"
 say
-exec "$INSTALL_DIR/$BIN_NAME" install
+if [[ -e /dev/tty ]]; then
+  exec "$INSTALL_DIR/$BIN_NAME" install </dev/tty
+else
+  warn "Нет доступа к /dev/tty — мастер установки не сможет считать ввод."
+  say  "Бинарь уже на месте. Заверши настройку вручную:"
+  say  "    sudo $INSTALL_DIR/$BIN_NAME install"
+  exit 0
+fi

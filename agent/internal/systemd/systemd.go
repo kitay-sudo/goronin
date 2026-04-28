@@ -67,6 +67,39 @@ func Stop() error { return run("systemctl", "stop", ServiceName) }
 // Restart bounces the service.
 func Restart() error { return run("systemctl", "restart", ServiceName) }
 
+// Disable removes the service from boot (idempotent — no error if absent).
+func Disable() error { return run("systemctl", "disable", ServiceName) }
+
+// IsActive reports whether systemd considers the service running. Returns
+// false on any error (unit missing, systemd unhappy) — callers use this for
+// "is it safe to skip the start step", not for security decisions.
+func IsActive() bool {
+	out, err := exec.Command("systemctl", "is-active", "--quiet", ServiceName).CombinedOutput()
+	_ = out
+	return err == nil
+}
+
+// UnitExists checks whether the unit file is on disk.
+func UnitExists() bool {
+	_, err := os.Stat(UnitPath)
+	return err == nil
+}
+
+// Uninstall stops + disables the service and removes the unit file.
+// Each step is best-effort — a missing service is not an error, since the
+// goal is "leave the system clean" not "verify prior state".
+func Uninstall() error {
+	_ = run("systemctl", "stop", ServiceName)
+	_ = run("systemctl", "disable", ServiceName)
+	if err := os.Remove(UnitPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove unit file: %w", err)
+	}
+	if err := run("systemctl", "daemon-reload"); err != nil {
+		return fmt.Errorf("systemctl daemon-reload: %w", err)
+	}
+	return nil
+}
+
 // Status streams `systemctl status` output to stdout.
 func Status() error { return runInteractive("systemctl", "status", ServiceName, "--no-pager") }
 

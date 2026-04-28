@@ -13,6 +13,7 @@ package wizard
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -25,6 +26,11 @@ import (
 	"github.com/kitay-sudo/goronin/agent/internal/telegram"
 )
 
+// errNoTTY is returned when stdin closes mid-wizard (pipe, non-interactive
+// run). Without this the required-field loops would spin forever printing
+// "⚠ Поле обязательно." to a stdout no one is reading.
+var errNoTTY = errors.New("stdin закрыт или не интерактивный — запусти `sudo goronin install` напрямую в терминале, не через pipe")
+
 // Run prompts on `in`, writes UI to `out`, and returns a populated config
 // or the first error encountered. The caller is responsible for actually
 // saving the config (config.Save) — separating I/O makes Run testable.
@@ -36,14 +42,22 @@ func Run(in io.Reader, out io.Writer) (*config.Config, error) {
 
 	// --- Server name ---
 	hostname, _ := os.Hostname()
-	cfg.ServerName = ask(r, out, "Имя сервера", hostname)
+	serverName, err := ask(r, out, "Имя сервера", hostname)
+	if err != nil {
+		return nil, err
+	}
+	cfg.ServerName = serverName
 
 	// --- Telegram ---
 	section(out, "Telegram")
 	fmt.Fprintln(out, "  Создай бота через @BotFather, скопируй токен.")
 	fmt.Fprintln(out, "  Узнай свой chat_id у @userinfobot.")
-	cfg.Telegram.BotToken = askRequired(r, out, "Bot token")
-	cfg.Telegram.ChatID = askRequired(r, out, "Chat ID")
+	if cfg.Telegram.BotToken, err = askRequired(r, out, "Bot token"); err != nil {
+		return nil, err
+	}
+	if cfg.Telegram.ChatID, err = askRequired(r, out, "Chat ID"); err != nil {
+		return nil, err
+	}
 
 	if err := verifyTelegram(out, cfg.Telegram); err != nil {
 		return nil, fmt.Errorf("проверка Telegram: %w", err)
@@ -53,54 +67,91 @@ func Run(in io.Reader, out io.Writer) (*config.Config, error) {
 	section(out, "AI-анализ событий (опционально)")
 	fmt.Fprintln(out, "  Без AI алерты будут приходить, просто без подробного разбора.")
 	fmt.Fprintln(out, "  Провайдеры: anthropic / openai / gemini / none")
-	provider := strings.ToLower(strings.TrimSpace(ask(r, out, "Провайдер", "none")))
+	providerRaw, err := ask(r, out, "Провайдер", "none")
+	if err != nil {
+		return nil, err
+	}
+	provider := strings.ToLower(strings.TrimSpace(providerRaw))
 	switch provider {
 	case "", "none", "n":
 		cfg.AI.Provider = config.AIProviderNone
 	case "anthropic", "a", "claude":
 		cfg.AI.Provider = config.AIProviderAnthropic
-		cfg.AI.APIKey = askRequired(r, out, "Anthropic API key")
-		cfg.AI.Model = ask(r, out, "Модель", "claude-sonnet-4-6")
+		if cfg.AI.APIKey, err = askRequired(r, out, "Anthropic API key"); err != nil {
+			return nil, err
+		}
+		if cfg.AI.Model, err = ask(r, out, "Модель", "claude-sonnet-4-6"); err != nil {
+			return nil, err
+		}
 	case "openai", "o", "gpt":
 		cfg.AI.Provider = config.AIProviderOpenAI
-		cfg.AI.APIKey = askRequired(r, out, "OpenAI API key")
-		cfg.AI.Model = ask(r, out, "Модель", "gpt-4o-mini")
+		if cfg.AI.APIKey, err = askRequired(r, out, "OpenAI API key"); err != nil {
+			return nil, err
+		}
+		if cfg.AI.Model, err = ask(r, out, "Модель", "gpt-4o-mini"); err != nil {
+			return nil, err
+		}
 	case "gemini", "g", "google":
 		cfg.AI.Provider = config.AIProviderGemini
-		cfg.AI.APIKey = askRequired(r, out, "Gemini API key")
-		cfg.AI.Model = ask(r, out, "Модель", "gemini-2.0-flash")
+		if cfg.AI.APIKey, err = askRequired(r, out, "Gemini API key"); err != nil {
+			return nil, err
+		}
+		if cfg.AI.Model, err = ask(r, out, "Модель", "gemini-2.0-flash"); err != nil {
+			return nil, err
+		}
 	default:
 		return nil, fmt.Errorf("неизвестный провайдер: %s", provider)
 	}
 
 	// --- Traps ---
 	section(out, "Honeypot ловушки")
-	cfg.Traps.SSH = askYes(r, out, "Включить SSH ловушку", true)
-	cfg.Traps.HTTP = askYes(r, out, "Включить HTTP ловушку", true)
-	cfg.Traps.FTP = askYes(r, out, "Включить FTP ловушку", true)
-	cfg.Traps.DB = askYes(r, out, "Включить DB ловушку", true)
+	if cfg.Traps.SSH, err = askYes(r, out, "Включить SSH ловушку", true); err != nil {
+		return nil, err
+	}
+	if cfg.Traps.HTTP, err = askYes(r, out, "Включить HTTP ловушку", true); err != nil {
+		return nil, err
+	}
+	if cfg.Traps.FTP, err = askYes(r, out, "Включить FTP ловушку", true); err != nil {
+		return nil, err
+	}
+	if cfg.Traps.DB, err = askYes(r, out, "Включить DB ловушку", true); err != nil {
+		return nil, err
+	}
 
 	// --- Auto-ban ---
 	section(out, "Авто-бан атакующих (iptables)")
 	fmt.Fprintln(out, "  off        — не банить, только присылать алерты")
 	fmt.Fprintln(out, "  alert_only — логировать что забанилось бы, не трогать iptables")
 	fmt.Fprintln(out, "  enforce    — банить (рекомендуется после первой недели)")
-	mode := strings.ToLower(strings.TrimSpace(ask(r, out, "Режим", "enforce")))
+	modeRaw, err := ask(r, out, "Режим", "enforce")
+	if err != nil {
+		return nil, err
+	}
+	mode := strings.ToLower(strings.TrimSpace(modeRaw))
 	switch mode {
 	case "off", "alert_only", "enforce":
 		cfg.AutoBan.Mode = mode
 	default:
 		return nil, fmt.Errorf("неизвестный режим: %s", mode)
 	}
-	cfg.AutoBan.Threshold = askInt(r, out, "Сколько коннектов до бана", 3)
-	cfg.AutoBan.Window = askDuration(r, out, "Окно подсчёта", 5*time.Minute)
-	cfg.AutoBan.BlockDuration = askDuration(r, out, "Длительность бана", 1*time.Hour)
+	if cfg.AutoBan.Threshold, err = askInt(r, out, "Сколько коннектов до бана", 3); err != nil {
+		return nil, err
+	}
+	if cfg.AutoBan.Window, err = askDuration(r, out, "Окно подсчёта", 5*time.Minute); err != nil {
+		return nil, err
+	}
+	if cfg.AutoBan.BlockDuration, err = askDuration(r, out, "Длительность бана", 1*time.Hour); err != nil {
+		return nil, err
+	}
 
 	// --- Whitelist ---
 	section(out, "Whitelist IP (через запятую — пентестеры, мониторинг, CI)")
 	currentIP := detectOwnIP()
 	defaultWL := currentIP
-	wl := ask(r, out, "Whitelist", defaultWL)
+	wl, err := ask(r, out, "Whitelist", defaultWL)
+	if err != nil {
+		return nil, err
+	}
 	for _, raw := range strings.Split(wl, ",") {
 		ip := strings.TrimSpace(raw)
 		if ip != "" {
@@ -133,68 +184,100 @@ func section(out io.Writer, title string) {
 	fmt.Fprintln(out, "── "+title+" ─────")
 }
 
-func ask(r *bufio.Reader, out io.Writer, prompt, defaultVal string) string {
+// readLine reads one line from r. On EOF it returns errNoTTY so the caller
+// bails out instead of looping forever on validation failures.
+func readLine(r *bufio.Reader) (string, error) {
+	line, err := r.ReadString('\n')
+	if err != nil {
+		// Partial line on EOF still counts as input (the user pressed Ctrl-D
+		// after typing something); only treat fully-empty EOF as no-tty.
+		if errors.Is(err, io.EOF) && line == "" {
+			return "", errNoTTY
+		}
+		if !errors.Is(err, io.EOF) {
+			return "", err
+		}
+	}
+	return line, nil
+}
+
+func ask(r *bufio.Reader, out io.Writer, prompt, defaultVal string) (string, error) {
 	if defaultVal != "" {
 		fmt.Fprintf(out, "  %s [%s]: ", prompt, defaultVal)
 	} else {
 		fmt.Fprintf(out, "  %s: ", prompt)
 	}
-	line, _ := r.ReadString('\n')
+	line, err := readLine(r)
+	if err != nil {
+		return "", err
+	}
 	line = strings.TrimSpace(line)
 	if line == "" {
-		return defaultVal
+		return defaultVal, nil
 	}
-	return line
+	return line, nil
 }
 
-func askRequired(r *bufio.Reader, out io.Writer, prompt string) string {
+func askRequired(r *bufio.Reader, out io.Writer, prompt string) (string, error) {
 	for {
-		val := ask(r, out, prompt, "")
+		val, err := ask(r, out, prompt, "")
+		if err != nil {
+			return "", err
+		}
 		if val != "" {
-			return val
+			return val, nil
 		}
 		fmt.Fprintln(out, "  ⚠ Поле обязательно.")
 	}
 }
 
-func askYes(r *bufio.Reader, out io.Writer, prompt string, def bool) bool {
+func askYes(r *bufio.Reader, out io.Writer, prompt string, def bool) (bool, error) {
 	defStr := "Y/n"
 	if !def {
 		defStr = "y/N"
 	}
 	for {
 		fmt.Fprintf(out, "  %s [%s]: ", prompt, defStr)
-		line, _ := r.ReadString('\n')
+		line, err := readLine(r)
+		if err != nil {
+			return false, err
+		}
 		line = strings.ToLower(strings.TrimSpace(line))
 		switch line {
 		case "":
-			return def
+			return def, nil
 		case "y", "yes", "д", "да":
-			return true
+			return true, nil
 		case "n", "no", "н", "нет":
-			return false
+			return false, nil
 		}
 		fmt.Fprintln(out, "  ⚠ Введите y или n.")
 	}
 }
 
-func askInt(r *bufio.Reader, out io.Writer, prompt string, def int) int {
+func askInt(r *bufio.Reader, out io.Writer, prompt string, def int) (int, error) {
 	for {
-		raw := ask(r, out, prompt, strconv.Itoa(def))
+		raw, err := ask(r, out, prompt, strconv.Itoa(def))
+		if err != nil {
+			return 0, err
+		}
 		n, err := strconv.Atoi(raw)
 		if err == nil {
-			return n
+			return n, nil
 		}
 		fmt.Fprintln(out, "  ⚠ Нужно целое число.")
 	}
 }
 
-func askDuration(r *bufio.Reader, out io.Writer, prompt string, def time.Duration) time.Duration {
+func askDuration(r *bufio.Reader, out io.Writer, prompt string, def time.Duration) (time.Duration, error) {
 	for {
-		raw := ask(r, out, prompt, def.String())
+		raw, err := ask(r, out, prompt, def.String())
+		if err != nil {
+			return 0, err
+		}
 		d, err := time.ParseDuration(raw)
 		if err == nil {
-			return d
+			return d, nil
 		}
 		fmt.Fprintln(out, "  ⚠ Формат: 5m, 1h, 24h, и т.п.")
 	}

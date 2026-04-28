@@ -3,6 +3,7 @@
 // Subcommands:
 //   install      — interactive wizard, writes config.yml + systemd unit, starts service
 //   reconfigure  — re-runs the wizard, restarts the service
+//   uninstall    — stop service, remove unit + binary + config + data
 //   daemon       — the actual long-running process (called by systemd, not the user)
 //   start/stop/restart/status/logs — systemd wrappers
 //   unban <ip>   — remove an IP from the GORONIN-BLOCK chain
@@ -50,6 +51,8 @@ func main() {
 		runInstall()
 	case "reconfigure":
 		runReconfigure()
+	case "uninstall":
+		runUninstall()
 	case "daemon":
 		runDaemon()
 	case "start":
@@ -84,6 +87,7 @@ func usage() {
 Использование:
   goronin install              интерактивная установка (требует root)
   goronin reconfigure          перезапустить wizard и перезагрузить сервис
+  goronin uninstall            полное удаление (сервис, бинарь, конфиг, данные)
   goronin start                запустить сервис
   goronin stop                 остановить сервис
   goronin restart              перезапустить сервис
@@ -101,6 +105,25 @@ func usage() {
 
 func runInstall() {
 	mustRoot()
+
+	// Idempotency: if a config already exists we're being re-run on top of
+	// an existing install (typical for `curl | sudo bash` doing an update).
+	// Don't blow away the wizard's prior answers — tell the user what to do.
+	if _, err := os.Stat(config.DefaultPath); err == nil {
+		fmt.Println("GORONIN уже установлен (найден", config.DefaultPath+").")
+		fmt.Println()
+		fmt.Println("  Изменить настройки:   sudo goronin reconfigure")
+		fmt.Println("  Полностью удалить:    sudo goronin uninstall")
+		fmt.Println()
+		fmt.Println("Бинарь обновлён, сервис перезапускаю…")
+		if systemd.UnitExists() {
+			if err := systemd.Restart(); err != nil {
+				fail("restart:", err)
+			}
+			fmt.Println("✓ Сервис перезапущен с новой версией")
+		}
+		return
+	}
 
 	cfg, err := wizard.Run(os.Stdin, os.Stdout)
 	if err != nil {
@@ -154,6 +177,64 @@ func runReconfigure() {
 		fail("restart:", err)
 	}
 	fmt.Println("✓ Конфиг обновлён, сервис перезапущен")
+}
+
+// runUninstall tears down everything `install` created. Best-effort —
+// keep going past missing files so a half-broken install can still be
+// cleaned up. The binary itself is removed last (and only if it lives
+// in /usr/local/bin), so we don't accidentally delete a dev build the
+// user is running from somewhere else.
+func runUninstall() {
+	mustRoot()
+
+	// Try to load the config to know where DataDir lives. If the file is
+	// missing or unparseable, fall back to the default path — uninstall
+	// must still work on a corrupted install.
+	dataDir := "/var/lib/goronin"
+	if cfg, err := config.Load(config.DefaultPath); err == nil && cfg.DataDir != "" {
+		dataDir = cfg.DataDir
+	}
+
+	// Best-effort firewall cleanup: try to flush the iptables chain so
+	// we don't leave dangling REJECT rules pointing at IPs we've forgotten.
+	// We open storage only to call ResetChain, so silently skip if it fails.
+	if store, err := storage.Open(dataDir + "/state.db"); err == nil {
+		fw := firewall.New(nil, firewall.RealExecutor{}).WithStorage(store)
+		_ = fw.ResetChain()
+		_ = store.Close()
+	}
+
+	fmt.Println("Останавливаю и удаляю systemd unit…")
+	if err := systemd.Uninstall(); err != nil {
+		fmt.Fprintln(os.Stderr, "  ⚠", err)
+	}
+
+	fmt.Println("Удаляю конфиг:", config.DefaultPath)
+	if err := os.RemoveAll("/etc/goronin"); err != nil {
+		fmt.Fprintln(os.Stderr, "  ⚠ удаление /etc/goronin:", err)
+	}
+
+	fmt.Println("Удаляю данные:", dataDir)
+	if err := os.RemoveAll(dataDir); err != nil {
+		fmt.Fprintln(os.Stderr, "  ⚠ удаление", dataDir+":", err)
+	}
+
+	const installedBin = "/usr/local/bin/goronin"
+	if binPath, err := os.Executable(); err == nil && binPath == installedBin {
+		// We're about to delete the binary we're running — that's fine on
+		// Linux (the kernel keeps the inode alive until exit), but flag it
+		// so the user understands why `goronin` is gone after this command.
+		fmt.Println("Удаляю бинарь:", installedBin)
+		if err := os.Remove(installedBin); err != nil && !os.IsNotExist(err) {
+			fmt.Fprintln(os.Stderr, "  ⚠", err)
+		}
+	} else if _, err := os.Stat(installedBin); err == nil {
+		fmt.Println("Удаляю бинарь:", installedBin)
+		_ = os.Remove(installedBin)
+	}
+
+	fmt.Println()
+	fmt.Println("✓ GORONIN полностью удалён")
 }
 
 // ---------- daemon ----------
