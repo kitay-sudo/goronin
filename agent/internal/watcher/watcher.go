@@ -7,11 +7,43 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/kitay-sudo/goronin/agent/pkg/protocol"
 )
+
+// canonicalizePath returns a stable, comparable form of p:
+// expands ~ and env vars, makes it absolute, resolves symlinks if the file
+// exists, and lowercases on case-insensitive filesystems.
+// Used both when registering canaries and when matching fsnotify events,
+// so user-supplied paths and OS-reported paths always normalize to the same key.
+func canonicalizePath(p string) (string, error) {
+	p = os.ExpandEnv(p)
+	if strings.HasPrefix(p, "~") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			p = filepath.Join(home, strings.TrimPrefix(p, "~"))
+		}
+	}
+
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+
+	// EvalSymlinks fails if the path does not exist; fall back to abs in that case
+	// so we can still register canaries that will be created later.
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+
+	if runtime.GOOS == "windows" {
+		abs = strings.ToLower(abs)
+	}
+	return abs, nil
+}
 
 // EventCallback is called when a watched file is accessed
 type EventCallback func(event protocol.EventRequest)
@@ -21,6 +53,7 @@ type Watcher struct {
 	fsWatcher *fsnotify.Watcher
 	callback  EventCallback
 	watched   map[string]bool
+	canaries  map[string]bool
 }
 
 func New(callback EventCallback) (*Watcher, error) {
@@ -33,6 +66,7 @@ func New(callback EventCallback) (*Watcher, error) {
 		fsWatcher: fw,
 		callback:  callback,
 		watched:   make(map[string]bool),
+		canaries:  make(map[string]bool),
 	}, nil
 }
 
@@ -44,7 +78,16 @@ func (w *Watcher) WatchFiles(paths []string) {
 			continue
 		}
 
-		dir := filepath.Dir(p)
+		canon, err := canonicalizePath(p)
+		if err != nil {
+			log.Printf("[watcher] Failed to resolve %s: %v", p, err)
+			continue
+		}
+		dir, err := canonicalizePath(filepath.Dir(canon))
+		if err != nil {
+			log.Printf("[watcher] Failed to resolve dir of %s: %v", canon, err)
+			continue
+		}
 		if !w.watched[dir] {
 			if err := w.fsWatcher.Add(dir); err != nil {
 				log.Printf("[watcher] Failed to watch %s: %v", dir, err)
@@ -52,7 +95,8 @@ func (w *Watcher) WatchFiles(paths []string) {
 			}
 			w.watched[dir] = true
 		}
-		log.Printf("[watcher] Watching: %s", p)
+		w.canaries[canon] = true
+		log.Printf("[watcher] Watching: %s", canon)
 	}
 }
 
@@ -84,32 +128,48 @@ func (w *Watcher) CreateCanaries(dirs []string) []string {
 				continue
 			}
 
-			created = append(created, path)
-			log.Printf("[watcher] Canary created: %s", path)
+			canon, err := canonicalizePath(path)
+			if err != nil {
+				canon = path
+			}
+			created = append(created, canon)
+			log.Printf("[watcher] Canary created: %s", canon)
 		}
 	}
 
 	return created
 }
 
-// AutoDiscover finds sensitive files on the system
+// AutoDiscover finds sensitive files on the system.
+// Excludes files mutated by system tooling (e.g. /etc/shadow on passwd/useradd)
+// to avoid false positives.
 func AutoDiscover() []string {
 	patterns := []string{
 		"/root/.env",
 		"/home/*/.env",
 		"/home/*/.ssh/id_rsa",
 		"/var/www/*/.env",
-		"/etc/shadow",
 		"/root/.ssh/id_rsa",
 	}
 
+	seen := make(map[string]bool)
 	var found []string
 	for _, pattern := range patterns {
 		matches, err := filepath.Glob(pattern)
 		if err != nil {
 			continue
 		}
-		found = append(found, matches...)
+		for _, m := range matches {
+			canon, err := canonicalizePath(m)
+			if err != nil {
+				canon = m
+			}
+			if seen[canon] {
+				continue
+			}
+			seen[canon] = true
+			found = append(found, canon)
+		}
 	}
 
 	return found
@@ -124,13 +184,20 @@ func (w *Watcher) Start() {
 				if !ok {
 					return
 				}
-				if event.Has(fsnotify.Write) || event.Has(fsnotify.Remove) || event.Has(fsnotify.Chmod) {
-					log.Printf("[watcher] File event: %s %s", event.Op, event.Name)
+				canon, err := canonicalizePath(event.Name)
+				if err != nil {
+					continue
+				}
+				if !w.canaries[canon] {
+					continue
+				}
+				if event.Has(fsnotify.Write) || event.Has(fsnotify.Remove) {
+					log.Printf("[watcher] Canary triggered: %s %s", event.Op, canon)
 					w.callback(protocol.EventRequest{
 						Type:     protocol.EventFileCanary,
 						SourceIP: "localhost",
 						Details: map[string]string{
-							"file":      event.Name,
+							"file":      canon,
 							"operation": event.Op.String(),
 						},
 					})

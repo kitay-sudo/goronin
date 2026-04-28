@@ -215,6 +215,68 @@ sudo goronin logs -f                    # видно что запустилос
 
 ---
 
+## Обновление до новой версии
+
+Та же одна команда, что и при установке:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/kitay-sudo/goronin/main/install.sh | sudo bash
+```
+
+Скрипт сам понимает, что делать:
+
+| Состояние сервера | Что произойдёт |
+|---|---|
+| Конфиг уже есть (`/etc/goronin/config.yml`) | Скачает новый бинарь, заменит старый, перезапустит сервис. **Wizard не запустится — токены, IP, whitelist, баны сохранятся.** |
+| Чистый сервер | Скачает бинарь и запустит wizard для первой настройки. |
+
+Накопленные баны IP и счётчики хитов в `/var/lib/goronin/state.db` тоже переживают обновление.
+
+После обновления увидишь:
+
+```
+✓ Бинарь: /usr/local/bin/goronin (goronin v0.3.0)
+✓ Сервис перезапущен с новой версией
+```
+
+---
+
+## Удаление
+
+**Полностью снести агента** (сервис, бинарь, конфиг, данные, iptables-правила):
+
+```bash
+sudo goronin uninstall
+```
+
+или (если бинарь сломан / его нет / забыл что установлено):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/kitay-sudo/goronin/main/install.sh | sudo bash -s -- --uninstall
+```
+
+Обе команды делают одно и то же:
+
+| Что удаляется | Путь |
+|---|---|
+| Сервис systemd (stop + disable + unit-файл) | `/etc/systemd/system/goronin.service` |
+| Бинарь | `/usr/local/bin/goronin` |
+| Конфиг | `/etc/goronin/` (вся папка) |
+| Данные (state.db, активные баны, счётчики) | `/var/lib/goronin/` |
+| iptables-цепочка `GORONIN-BLOCK` | сбрасывается (`iptables -F`) |
+
+После — на сервере не остаётся **ничего** от GORONIN.
+
+**Переустановка с нуля** (снести и поставить заново — wizard заново спросит токены):
+
+```bash
+curl -sSL https://raw.githubusercontent.com/kitay-sudo/goronin/main/install.sh | sudo bash -s -- --reinstall
+```
+
+Полезно когда хочешь сменить Telegram-бота полностью или не помнишь какие настройки были.
+
+---
+
 ## Поддержать
 
 Проект развивается на энтузиазме и в свободное время. Если GORONIN оказался полезен — поддержать можно криптой:
