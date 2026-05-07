@@ -269,6 +269,38 @@ func TestRecordHit_EscalatesOnRepeatOffender(t *testing.T) {
 	}
 }
 
+func TestRecordHit_PermanentBan_FirstHit(t *testing.T) {
+	// New default policy: Threshold=1, BlockDuration=0 (forever).
+	mock := &mockExecutor{}
+	fw := New(nil, mock).
+		WithStorage(openTempStore(t)).
+		WithPolicy(config.AutoBanConfig{Mode: "enforce", Threshold: 1, BlockDuration: 0})
+
+	r := fw.RecordHit("7.7.7.7", "ssh_trap")
+	if r != ResultBlocked {
+		t.Fatalf("first hit should block immediately, got %s", r)
+	}
+	entry := fw.GetEntry("7.7.7.7")
+	if entry == nil {
+		t.Fatal("expected entry to exist")
+	}
+	if !entry.ExpiresAt.IsZero() {
+		t.Errorf("permanent ban must have zero ExpiresAt, got %v", entry.ExpiresAt)
+	}
+
+	// expireOnce must NOT remove a permanent ban even far in the future.
+	fw.expireOnce()
+	if fw.GetEntry("7.7.7.7") == nil {
+		t.Error("permanent ban must survive expiry sweep")
+	}
+
+	// BlockInfo: blocked=true, remaining=0 is the permanent signal.
+	blocked, remaining := fw.BlockInfo("7.7.7.7")
+	if !blocked || remaining != 0 {
+		t.Errorf("BlockInfo permanent: want (true, 0), got (%v, %v)", blocked, remaining)
+	}
+}
+
 func TestRecordHit_AlertOnlyMode_DoesNotTouchIptables(t *testing.T) {
 	mock := &mockExecutor{}
 	fw := New(nil, mock).

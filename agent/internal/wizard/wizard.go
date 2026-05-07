@@ -134,13 +134,15 @@ func Run(in io.Reader, out io.Writer) (*config.Config, error) {
 	default:
 		return nil, fmt.Errorf("неизвестный режим: %s", mode)
 	}
-	if cfg.AutoBan.Threshold, err = askInt(r, out, "Сколько коннектов до бана", 3); err != nil {
+	if cfg.AutoBan.Threshold, err = askInt(r, out, "Сколько коннектов до бана", 1); err != nil {
 		return nil, err
 	}
 	if cfg.AutoBan.Window, err = askDuration(r, out, "Окно подсчёта", 5*time.Minute); err != nil {
 		return nil, err
 	}
-	if cfg.AutoBan.BlockDuration, err = askDuration(r, out, "Длительность бана", 1*time.Hour); err != nil {
+	fmt.Fprintln(out, "  0 = бан навсегда (рекомендуется для honeypot — на порт-приманку")
+	fmt.Fprintln(out, "  легитимного трафика не бывает; снимать вручную через `goronin unban`).")
+	if cfg.AutoBan.BlockDuration, err = askDurationOrForever(r, out, "Длительность бана (0 = навсегда)", 0); err != nil {
 		return nil, err
 	}
 
@@ -280,6 +282,31 @@ func askDuration(r *bufio.Reader, out io.Writer, prompt string, def time.Duratio
 			return d, nil
 		}
 		fmt.Fprintln(out, "  ⚠ Формат: 5m, 1h, 24h, и т.п.")
+	}
+}
+
+// askDurationOrForever is askDuration plus the special tokens "0",
+// "forever", "навсегда" → time.Duration(0), used as the permanent-ban
+// sentinel by the firewall layer.
+func askDurationOrForever(r *bufio.Reader, out io.Writer, prompt string, def time.Duration) (time.Duration, error) {
+	defStr := def.String()
+	if def == 0 {
+		defStr = "0"
+	}
+	for {
+		raw, err := ask(r, out, prompt, defStr)
+		if err != nil {
+			return 0, err
+		}
+		switch strings.ToLower(strings.TrimSpace(raw)) {
+		case "0", "forever", "навсегда", "permanent":
+			return 0, nil
+		}
+		d, err := time.ParseDuration(raw)
+		if err == nil {
+			return d, nil
+		}
+		fmt.Fprintln(out, "  ⚠ Формат: 0 (навсегда), либо 5m, 1h, 24h, и т.п.")
 	}
 }
 

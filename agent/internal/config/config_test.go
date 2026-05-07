@@ -135,8 +135,11 @@ func TestApplyDefaults_FillsBlanks(t *testing.T) {
 	if cfg.AutoBan.Mode != "enforce" {
 		t.Errorf("auto_ban.mode default: %q", cfg.AutoBan.Mode)
 	}
-	if cfg.AutoBan.Threshold != 3 {
+	if cfg.AutoBan.Threshold != 1 {
 		t.Errorf("auto_ban.threshold default: %d", cfg.AutoBan.Threshold)
+	}
+	if cfg.AutoBan.BlockDuration != 0 {
+		t.Errorf("auto_ban.block_duration default should be 0 (permanent), got %v", cfg.AutoBan.BlockDuration)
 	}
 	if cfg.DataDir != "/var/lib/goronin" {
 		t.Errorf("data_dir default: %q", cfg.DataDir)

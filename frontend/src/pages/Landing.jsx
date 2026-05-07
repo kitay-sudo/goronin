@@ -20,6 +20,10 @@ import {
   Sparkles,
   Server,
   ArrowRight,
+  Map,
+  CheckCircle2,
+  Loader2,
+  Circle,
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import GridBackground from '../components/landing/GridBackground';
@@ -51,6 +55,7 @@ export default function Landing() {
       <Support />
       <CTA />
       <Changelog />
+      <Roadmap />
       <Footer />
       <BackToTop />
     </div>
@@ -109,6 +114,7 @@ function Nav() {
           <a href="#install" className="hover:text-zinc-100 transition-colors">Установка</a>
           <a href="#faq" className="hover:text-zinc-100 transition-colors">FAQ</a>
           <a href="#changelog" className="hover:text-zinc-100 transition-colors">Изменения</a>
+          <a href="#roadmap" className="hover:text-zinc-100 transition-colors">Roadmap</a>
           <a href="#support" className="text-amber-300/90 hover:text-amber-200 transition-colors inline-flex items-center gap-1.5">
             <Heart size={12} fill="currentColor" />
             Стена чести
@@ -367,7 +373,7 @@ function Features() {
     {
       icon: Gauge,
       title: 'Авто-бан в iptables',
-      description: 'Threshold + эскалация: 3 хита за 5 мин — бан на час, повтор — на сутки. Persistent.',
+      description: 'Один хит на ловушку = постоянный бан. Сохраняется в bbolt, переживает рестарт. Снять — `goronin unban`.',
     },
     {
       icon: Lock,
@@ -631,7 +637,7 @@ function FAQ() {
     },
     {
       q: 'Что именно делает агент?',
-      a: '1) Поднимает honeypot-ловушки на случайных high-портах (SSH/HTTP/FTP/MySQL). 2) Через inotify следит за чувствительными файлами и созданными канарейками. 3) При попадании в ловушку — пишет в локальный bbolt, считает hits per IP, банит через iptables (с эскалацией). 4) Шлёт алерт в Telegram, опционально с AI-разбором.',
+      a: '1) Поднимает honeypot-ловушки на случайных high-портах (SSH/HTTP/FTP/MySQL). 2) Через inotify следит за чувствительными файлами и созданными канарейками. 3) При попадании в ловушку — пишет в локальный bbolt и сразу банит атакующий IP через iptables навсегда (на порт-приманку легитимного трафика не бывает). Снять можно вручную: `goronin unban <ip>`. 4) Шлёт алерт в Telegram, опционально с AI-разбором.',
     },
     {
       q: 'Заменяет ли это fail2ban / CrowdSec?',
@@ -1289,6 +1295,159 @@ function Changelog() {
   );
 }
 
+// Дорожная карта. Чтобы добавить пункт — допиши объект в массив.
+//   status — 'shipped' (вышло, верхняя плашка), 'in-progress' (сейчас в работе),
+//            'planned' (на горизонте, без обязательств).
+//   title  — короткая шапка пункта.
+//   desc   — 1-2 предложения, что это и зачем. Без обещаний дат.
+const ROADMAP = [
+  {
+    status: 'in-progress',
+    title: 'Поддержка nftables + IPv6',
+    desc: 'Современные дистрибы (Debian 12, RHEL 9) уже на nftables, а атаки давно идут и по IPv6. Добавим автодетект бэкенда файрвола и параллельный ban-chain для v6.',
+  },
+  {
+    status: 'planned',
+    title: 'Локальный web-дашборд',
+    desc: 'Маленький встроенный UI на 127.0.0.1: таблица последних событий, активные баны, кнопка unban. Без аккаунтов, доступ только через SSH-туннель — секреты остаются на сервере.',
+  },
+  {
+    status: 'planned',
+    title: 'Slack / Discord / generic webhook',
+    desc: 'Альтернативные каналы для тех, у кого Telegram под запретом или вся команда живёт в Slack. Тот же набор алертов, выбор канала в wizard.',
+  },
+  {
+    status: 'planned',
+    title: 'GeoIP в алертах',
+    desc: 'Оффлайн-база MaxMind GeoLite2, страна/ASN атакующего прямо в сообщении. Опционально — превентивный бан целых стран для серверов, где трафик ожидается только из одного региона.',
+  },
+  {
+    status: 'planned',
+    title: 'Канарейки в БД и облачных бакетах',
+    desc: 'Расширение file-canary: фейковая запись в Postgres/MySQL, фейковый объект в S3-совместимом бакете. Любое чтение = тревога — срабатывает только если кто-то получил доступ к данным.',
+  },
+];
+
+function Roadmap() {
+  return (
+    <section id="roadmap" className="relative py-24 md:py-32 border-t border-zinc-900/80 overflow-hidden">
+      <KanjiWatermark
+        char="路"
+        className="left-[5%] top-[15%] text-[160px] md:text-[240px] hidden md:block"
+        target={0.03}
+      />
+      <KanjiWatermark
+        char="未"
+        className="right-[5%] top-[55%] text-[160px] md:text-[240px] hidden md:block"
+        target={0.025}
+      />
+
+      <div className="relative max-w-3xl mx-auto px-5">
+        <Reveal>
+          <div className="text-center">
+            <JapaneseDivider kanji="路" label="The Road Ahead" />
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight">
+              Дорожная карта
+            </h2>
+            <p className="mt-4 text-zinc-400 leading-relaxed max-w-xl mx-auto">
+              Куда движется проект. Без обещаний дат — мы делаем GORONIN в свободное
+              время, и сначала чиним то, что важнее. Если хочешь предложить идею или
+              приоритизировать пункт — Issues на GitHub или{' '}
+              <a
+                href={TELEGRAM_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-emerald-300 hover:text-emerald-200 font-mono"
+              >
+                {TELEGRAM_HANDLE}
+              </a>
+              .
+            </p>
+          </div>
+        </Reveal>
+
+        <Reveal delay={0.1}>
+          <ul className="mt-12 space-y-3">
+            {ROADMAP.map((item) => (
+              <RoadmapItem key={item.title} item={item} />
+            ))}
+          </ul>
+        </Reveal>
+
+        <Reveal delay={0.2}>
+          <div className="mt-10 flex flex-wrap items-center justify-center gap-3">
+            <a
+              href="https://github.com/kitay-sudo/goronin/issues"
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-2 text-sm text-zinc-300 hover:text-zinc-100 border border-zinc-800 hover:border-zinc-700 rounded-lg px-4 py-2 transition-colors"
+            >
+              <Map size={14} />
+              Предложить фичу на GitHub
+            </a>
+          </div>
+        </Reveal>
+      </div>
+    </section>
+  );
+}
+
+function RoadmapItem({ item }) {
+  const config = {
+    'shipped': {
+      Icon: CheckCircle2,
+      label: 'Готово',
+      kanji: '完',
+      iconClass: 'text-emerald-400',
+      badge: 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300',
+      border: 'border-emerald-500/20',
+    },
+    'in-progress': {
+      Icon: Loader2,
+      label: 'В работе',
+      kanji: '行',
+      iconClass: 'text-amber-300 animate-spin-slow',
+      badge: 'border-amber-500/40 bg-amber-500/10 text-amber-200',
+      border: 'border-amber-500/20',
+    },
+    'planned': {
+      Icon: Circle,
+      label: 'Запланировано',
+      kanji: '次',
+      iconClass: 'text-zinc-500',
+      badge: 'border-zinc-700 bg-zinc-900/60 text-zinc-400',
+      border: 'border-zinc-800',
+    },
+  }[item.status] || {};
+  const { Icon, label, kanji, iconClass, badge, border } = config;
+
+  return (
+    <li
+      className={`rounded-2xl border ${border} bg-zinc-900/40 p-5 md:p-6 backdrop-blur transition-colors hover:bg-zinc-900/60`}
+    >
+      <div className="flex items-start gap-4">
+        <div className="shrink-0 mt-0.5">
+          {Icon && <Icon size={20} className={iconClass} strokeWidth={2} />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1.5">
+            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${badge} text-[10px] uppercase tracking-widest font-semibold`}>
+              <span style={{ fontFamily: '"Noto Serif JP", serif', fontWeight: 700 }}>
+                {kanji}
+              </span>
+              {label}
+            </span>
+            <h3 className="text-base md:text-lg font-semibold text-zinc-100">
+              {item.title}
+            </h3>
+          </div>
+          <p className="text-sm text-zinc-400 leading-relaxed">{item.desc}</p>
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function Footer() {
   return (
     <footer className="border-t border-zinc-900/80 py-10">
@@ -1310,6 +1469,7 @@ function Footer() {
           <a href="#install" className="hover:text-zinc-300 transition-colors">Установка</a>
           <a href="#faq" className="hover:text-zinc-300 transition-colors">FAQ</a>
           <a href="#changelog" className="hover:text-zinc-300 transition-colors">Изменения</a>
+          <a href="#roadmap" className="hover:text-zinc-300 transition-colors">Roadmap</a>
           <a href="#support" className="hover:text-zinc-300 transition-colors">Поддержать</a>
           <a href={REPO_URL} target="_blank" rel="noreferrer" className="hover:text-zinc-300 transition-colors flex items-center gap-1.5">
             <Github size={14} /> GitHub

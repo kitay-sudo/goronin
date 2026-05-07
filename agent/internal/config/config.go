@@ -52,10 +52,19 @@ type TrapsConfig struct {
 // blocking entirely (events still reach Telegram). Mode "alert_only"
 // logs would-be blocks without touching iptables — useful for the first
 // 24h to validate whitelist coverage.
+//
+// Defaults are tuned for honeypot semantics: a single hit on a trap port
+// has no legitimate cause, so Threshold=1 and BlockDuration=0
+// (permanent) ship as the baseline. Operators who want lighter-touch
+// behavior can raise the threshold or set a finite duration.
 type AutoBanConfig struct {
-	Mode          string        `yaml:"mode"` // "off" | "alert_only" | "enforce"
-	Threshold     int           `yaml:"threshold"`
-	Window        time.Duration `yaml:"window"`
+	Mode      string        `yaml:"mode"` // "off" | "alert_only" | "enforce"
+	Threshold int           `yaml:"threshold"`
+	Window    time.Duration `yaml:"window"`
+	// BlockDuration: how long an IP stays banned. 0 = forever (default).
+	// The firewall layer treats this as a sentinel and stores the block
+	// with a zero ExpiresAt so it survives restarts and isn't touched by
+	// the expiry loop. Use `goronin unban <ip>` to lift manually.
 	BlockDuration time.Duration `yaml:"block_duration"`
 }
 
@@ -116,14 +125,14 @@ func (c *Config) applyDefaults() {
 		c.AutoBan.Mode = "enforce"
 	}
 	if c.AutoBan.Threshold == 0 {
-		c.AutoBan.Threshold = 3
+		c.AutoBan.Threshold = 1
 	}
 	if c.AutoBan.Window == 0 {
 		c.AutoBan.Window = 5 * time.Minute
 	}
-	if c.AutoBan.BlockDuration == 0 {
-		c.AutoBan.BlockDuration = 1 * time.Hour
-	}
+	// BlockDuration: 0 is the sentinel for "permanent" and is also the
+	// default — do NOT backfill. Old configs without the key get the new
+	// permanent default automatically after upgrade.
 	if c.DataDir == "" {
 		c.DataDir = "/var/lib/goronin"
 	}

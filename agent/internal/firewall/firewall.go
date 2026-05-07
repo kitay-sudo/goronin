@@ -48,8 +48,17 @@ const (
 )
 
 // escalationDuration is applied when an IP returns after a previous ban
-// (HitCount >= threshold AND already had a block record).
+// and the configured BlockDuration is finite. When BlockDuration is 0
+// (permanent), there's nothing to escalate to.
 const escalationDuration = 24 * time.Hour
+
+// permanent is the sentinel BlockEntry.ExpiresAt value meaning "never
+// expires". Persisted as zero time in storage and skipped by expiryLoop.
+// time.IsZero() is the predicate everywhere we check this.
+//
+// Rationale: a hit on a honeypot port has no legitimate cause — there's
+// no reason to ever let that IP back. Default config ships with
+// BlockDuration=0 (permanent) and Threshold=1 (first hit = ban).
 
 // CommandExecutor abstracts running iptables so tests can mock it.
 type CommandExecutor interface {
@@ -148,7 +157,9 @@ func (f *Firewall) RestoreFromStorage() error {
 	now := time.Now()
 	restored := 0
 	for _, rec := range records {
-		if rec.ExpiresAt.Before(now) {
+		// Zero ExpiresAt = permanent ban — always restore. Finite expiry
+		// in the past = drop.
+		if !rec.ExpiresAt.IsZero() && rec.ExpiresAt.Before(now) {
 			_ = f.store.DeleteBlock(rec.IP)
 			continue
 		}
@@ -237,11 +248,13 @@ func (f *Firewall) RecordHit(ip, reason string) Result {
 
 	threshold := f.policy.Threshold
 	if threshold <= 0 {
-		threshold = 3
+		threshold = 1
 	}
+	// duration == 0 means "ban forever" — see the `permanent` sentinel
+	// comment above. Negative is treated as 0 too (defensive).
 	duration := f.policy.BlockDuration
-	if duration <= 0 {
-		duration = 1 * time.Hour
+	if duration < 0 {
+		duration = 0
 	}
 
 	// Track hits in storage (if available) so escalation survives restarts.
@@ -259,13 +272,15 @@ func (f *Firewall) RecordHit(ip, reason string) Result {
 		return ResultThreshold
 	}
 
-	// Threshold reached. Escalate duration on repeat offenders (count > threshold).
-	if count > threshold {
+	// Threshold reached. Escalate duration on repeat offenders (count >
+	// threshold), but only when the base policy is finite — there's
+	// nothing to escalate when we're already banning forever.
+	if count > threshold && duration > 0 && duration < escalationDuration {
 		duration = escalationDuration
 	}
 
 	if mode == "alert_only" {
-		log.Printf("[firewall] DRY-RUN would block %s for %v (hits=%d, reason=%s)", ip, duration, count, reason)
+		log.Printf("[firewall] DRY-RUN would block %s (%s, hits=%d, reason=%s)", ip, formatDuration(duration), count, reason)
 		return ResultDryRun
 	}
 	return f.BlockIP(ip, duration, reason)
@@ -287,11 +302,17 @@ func (f *Firewall) BlockIP(ip string, duration time.Duration, reason string) Res
 	defer f.mu.Unlock()
 
 	now := time.Now()
+	expiresAt := computeExpiry(now, duration)
+
 	if entry, exists := f.blocked[ip]; exists {
 		entry.HitCount++
-		newExpiry := now.Add(duration)
-		if newExpiry.After(entry.ExpiresAt) {
-			entry.ExpiresAt = newExpiry
+		// Permanent (zero ExpiresAt) always wins over finite, and a later
+		// finite expiry replaces an earlier one. Earlier finite never
+		// shortens an existing permanent ban.
+		if entry.ExpiresAt.IsZero() {
+			// already permanent — nothing to extend
+		} else if expiresAt.IsZero() || expiresAt.After(entry.ExpiresAt) {
+			entry.ExpiresAt = expiresAt
 			f.persistBlockLocked(entry)
 		}
 		return ResultAlreadyBlocked
@@ -305,13 +326,32 @@ func (f *Firewall) BlockIP(ip string, duration time.Duration, reason string) Res
 		IP:        ip,
 		Reason:    reason,
 		BlockedAt: now,
-		ExpiresAt: now.Add(duration),
+		ExpiresAt: expiresAt,
 		HitCount:  1,
 	}
 	f.blocked[ip] = entry
 	f.persistBlockLocked(entry)
-	log.Printf("[firewall] Blocked %s for %v (reason: %s)", ip, duration, reason)
+	log.Printf("[firewall] Blocked %s (%s, reason: %s)", ip, formatDuration(duration), reason)
 	return ResultBlocked
+}
+
+// computeExpiry maps a duration to an absolute expiry time. duration <= 0
+// means "permanent" and is represented as zero time so callers can use
+// time.IsZero() as the never-expires predicate.
+func computeExpiry(now time.Time, duration time.Duration) time.Time {
+	if duration <= 0 {
+		return time.Time{}
+	}
+	return now.Add(duration)
+}
+
+// formatDuration renders a ban duration for logs, with a friendly label
+// for the permanent sentinel (0).
+func formatDuration(d time.Duration) string {
+	if d <= 0 {
+		return "permanent"
+	}
+	return "for " + d.String()
 }
 
 // UnblockIP removes the DROP rule and the persisted block.
@@ -356,13 +396,19 @@ func (f *Firewall) GetEntry(ip string) *BlockEntry {
 }
 
 // BlockInfo returns whether an IP is currently blocked and the time
-// remaining on the block. Implements alerter.FirewallStatus.
+// remaining on the block. Implements alerter.FirewallStatus. For
+// permanent bans (ExpiresAt zero), returns (true, 0) — callers MUST
+// distinguish "0 = permanent" from "not blocked" via the bool, not the
+// duration.
 func (f *Firewall) BlockInfo(ip string) (bool, time.Duration) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	e, ok := f.blocked[ip]
 	if !ok {
 		return false, 0
+	}
+	if e.ExpiresAt.IsZero() {
+		return true, 0
 	}
 	remaining := time.Until(e.ExpiresAt)
 	if remaining < 0 {
@@ -401,6 +447,10 @@ func (f *Firewall) expireOnce() {
 	defer f.mu.Unlock()
 	now := time.Now()
 	for ip, entry := range f.blocked {
+		// Zero ExpiresAt = permanent ban, never auto-expire.
+		if entry.ExpiresAt.IsZero() {
+			continue
+		}
 		if now.After(entry.ExpiresAt) {
 			_ = f.unblockLocked(ip)
 		}
