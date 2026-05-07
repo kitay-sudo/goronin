@@ -1,13 +1,13 @@
 # --- Frontend (Vite/React) ---
 node_modules/
 dist/
+!frontend/dist/
 .env
 .env.*
 !.env.example
 coverage/
 docs/
 promo/
-frontend/
 
 # --- Go agent ---
 # собранные бинари не коммитим — релизит CI
